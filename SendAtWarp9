@@ -1,0 +1,8 @@
+#!/bin/bash
+if [ $# -lt 2 ] ; then
+	echo Usage: SendAtWarp9 host files
+	exit 0;
+fi
+HOST="$1"
+shift
+tar cf - "$@" | lzop -c -1 | nc -w 2 $HOST 9656

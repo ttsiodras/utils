@@ -1,0 +1,3 @@
+#!/bin/sh
+diff -w "$6" "$7"
+exit 0

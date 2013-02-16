@@ -1,0 +1,3 @@
+#!/bin/sh
+meld "$6" "$7"
+exit 0

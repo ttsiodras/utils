@@ -1,0 +1,2 @@
+#!/bin/sh
+dpkg-query -Wf '${Package;40}\t${Installed-Size}\n' | sort -n -k 2
