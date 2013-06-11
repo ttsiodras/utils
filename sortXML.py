@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+'''
+To be able to perform textual diff on two XML files,
+I needed to sort their attributes and elements.
+It was of no concern to XML parsers, but diff tools
+(meld, vimdiff, etc) cared about it - a lot :-)
+
+I am pretty sure this would be useful to many people.
+Gotta write a blog post about it, someday...
+'''
+
 import re
 import sys
 import codecs
