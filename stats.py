@@ -1,5 +1,31 @@
 #!/usr/bin/env python
+'''
+If you are able to generate (or filter - grep, sed, awk, etc) a list
+of numbers in your stdout, then just pipe it to this utility, and
+you will get nice, colored statistics:
 
+    $ i in {1..100} ; do echo $i ; done | stats.py
+
+    Statistics :
+      Average value: 50.50000
+      Std deviation: 28.86607
+      Sample stddev: 29.01149
+             Median: 50.50000
+                Min: 1.00000
+                Max: 100.00000
+       Overall: 50.5 +/- 57.4%
+
+Very useful if, like me, you benchmark short-lived runs a lot - e.g.
+
+    $ for i in {1..10} ; do \
+            bash -c "time /bin/ls /usr/bin/" 2>&1 >/dev/null | \
+            grep ^real | \
+            sed 's,0m,,;s,s,,;' | \
+            awk '{print $2}' ;
+      done | stats.py
+
+Naturally, I benchmark my own stuff, not ls :-)
+'''
 import math
 
 from sys import stdout
