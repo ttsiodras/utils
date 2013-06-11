@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#
+# When I want to compare two folders and remove the identical
+# files from the first one, I invoke this.
+#
+# Combined with cp -al, this is surprisingly powerful.
+#
 use File::Basename;
 use Digest::MD5;
 

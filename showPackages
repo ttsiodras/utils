@@ -1,2 +1,5 @@
 #!/bin/sh
+# 
+# Dear Debian, tell me which packages are eating up my precious space
+#
 dpkg-query -Wf '${Package;40}\t${Installed-Size}\n' | sort -n -k 2

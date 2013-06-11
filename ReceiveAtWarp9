@@ -1,2 +1,7 @@
 #!/bin/sh
+#
+# Fastest, hassle-free transfer of files:
+# On the receiving end, run this script.
+# On the sending end, run 'SendAtWarp9'.
+#
 nc -l -p 9656 | lzop -d | tar xpvf -

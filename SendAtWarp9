@@ -1,6 +1,11 @@
 #!/bin/bash
+#
+# Fastest, hassle-free transfer of files:
+# On the receiving end, run 'ReceiveAtWarp9'.
+# On the sending end, run this script.
+#
 if [ $# -lt 2 ] ; then
-	echo Usage: SendAtWarp9 host files
+	echo Usage: SendAtWarp9 host filesAndOrFolders
 	exit 0;
 fi
 HOST="$1"

@@ -1,4 +1,10 @@
 #!/usr/bin/perl -w
+#
+# For those cases where an epoch must mean something:
+#
+#   $ epochToHuman.pl 1231231231
+#   Dateline: 10:40:31-2009/01/06
+#
 use strict;
 
 die "Usage: $0  epoch\n" unless @ARGV == 1;

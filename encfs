@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# 
+# Stupid encfs needs absolute paths.
+#
 import os
 import sys
 

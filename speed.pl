@@ -1,4 +1,13 @@
 #!/usr/bin/perl -w
+#
+# If you are downloading a file via youtube-dl or FTP or SCP or
+# any other fancy protocol, this script can ack as a progress
+# and speed indicator - just 
+#
+#     speed.pl filename
+#
+# ...and you'll see.
+#
 use strict;
 
 die "Usage: $0 filename\n" unless @ARGV == 1;

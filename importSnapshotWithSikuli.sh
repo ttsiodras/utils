@@ -1,4 +1,7 @@
 #!/bin/sh
+# 
+# Easy screenshot of a range of the screen
+#
 if [ $# -ne 1 ] ; then
     echo Usage: $0 /path/to/filename.png
     exit 1

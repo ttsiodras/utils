@@ -1,4 +1,10 @@
 #!/bin/sh
+#
+# Used for nice diff output from 'git diff' 
+# For details look up my ~/.vimrc in GitHub
+# (http://github.com/ttsiodras/dotvim.git/.vimrc) 
+# and read the related comments (search for gitconfig).
+#
 if [ -z $SSH_CLIENT ] ; then
     meld "$2" "$5"
 else

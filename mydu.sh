@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# Much better than plain old "du -s -m/-k" - this actually
+# adds file sizes, so it's much more filesystem agnostic.
+#
 if [ $# -lt 1 ] ; then
         echo Usage: $0 dir1 dir2 ...
         exit 1

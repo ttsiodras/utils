@@ -1,4 +1,10 @@
 #!/bin/sh
+#
+# Used for nice diff output from 'svn diff' 
+# For details look up my ~/.vimrc in GitHub
+# (http://github.com/ttsiodras/dotvim.git/.vimrc) 
+# and read the related comments (search for svndiff).
+#
 if [ -z $SSH_CLIENT ] ; then
     meld "$6" "$7"
 else

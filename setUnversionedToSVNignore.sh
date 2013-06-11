@@ -1,5 +1,12 @@
 #!/bin/bash
-
+#
+# If 'svn status' shows you lots of '?' but you checked
+# them and know that they do not belong in the repos,
+# then just run this, and all 'svn:ignore' of all
+# folders will be updated to mark them as cruft.
+#
+# Note that you need to 'svn commit' after this.
+#
 propadd () {
   PROP=$1
   FILE=$2

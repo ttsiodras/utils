@@ -1,4 +1,11 @@
 #!/bin/bash
+#
+# For CPUs that can throttle themselves up/down,
+# it is important when you benchmark to pin them down
+# to "maximum strength". That's what this scripts
+# does. To do the reverse, i.e. to go back to normal,
+# load-based throttling. run 'ondemand'.
+#
 if [ `id -u` -ne 0 ] ; then
     echo As root
     exit 1

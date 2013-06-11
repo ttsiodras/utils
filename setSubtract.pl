@@ -1,4 +1,8 @@
 #!/usr/bin/perl -w
+#
+# So you want to subtract a list of strings from another one?
+# (ignoring order, etc) - use this little script.
+#
 use strict;
 die "Usage: $0 bigSet smallSet\n" unless @ARGV == 2;
 my %a;
