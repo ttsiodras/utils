@@ -17,7 +17,7 @@ import string
 def usage():
     print '''\
 My quick and dirty solution to extract files from a corrupted .tar archive.
-Usage: {{appName}} <options>
+Usage: {appName} <options>
 
 where mandatory options are:
 

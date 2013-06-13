@@ -22,7 +22,7 @@ from stat import ST_MTIME, ST_CTIME, ST_ATIME, ST_SIZE, ST_MODE, S_ISDIR
 
 def usage():
     print '''\
-Usage: {{mainApp}} <options> <folderToScan>
+Usage: {mainApp} <options> <folderToScan>
 
 where folderToScan is . by default, and options can be:
 
