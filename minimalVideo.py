@@ -10,7 +10,6 @@ Thanks to x264, the result is an optimal balance between size and quality.
 import os
 import sys
 import getopt
-import subprocess
 
 
 def panic(msg):
@@ -88,25 +87,25 @@ def main():
     inputVideo = os.path.abspath(inputVideo)
     outputVideo = os.path.abspath(outputVideo)
     outputRate = computeRate(inputVideo)
-    os.system("rm -f x264*log*")
-    # We are using bash-isms here, so I need subprocess.Popen's
-    # 'executable' keyword argument
-    subprocess.Popen(
-        "mplayer -nosound -benchmark -vo yuv4mpeg:file=>(" +
-        "x264 --demuxer y4m --threads auto --pass 1 --bitrate " +
-        str(outputRate) +
-        " -o /dev/null - 2>x264.log) \"" +
-        inputVideo + "\"",
-        shell=True,
-        executable="/bin/bash").wait()
-    subprocess.Popen(
-        "mplayer -nosound -benchmark -vo yuv4mpeg:file=>(" +
-        "x264 --demuxer y4m --threads auto --pass 2 --bitrate " +
-        str(outputRate) +
-        " -o \"" + outputVideo + ".video\"  - 2>x264.log) \"" +
-        inputVideo + "\"",
-        shell=True,
-        executable="/bin/bash").wait()
+    os.system("rm -f x264*log* /tmp/fifo")
+    os.system("mkfifo /tmp/fifo")
+    cmdPlay = "mplayer -nosound -benchmark -vo yuv4mpeg:file=/tmp/fifo"
+    cmdPlay += " '" + inputVideo + "' &"
+    cmdEncodeCommon = "x264 --demuxer y4m --threads auto --pass 1 --bitrate "
+    cmdEncodeCommon += str(outputRate)
+    cmdPass1 = cmdEncodeCommon + " -o /dev/null /tmp/fifo 2>x264.1.log"
+    cmdPass2 = cmdEncodeCommon + " -o '" + outputVideo + ".video' " + \
+        "/tmp/fifo 2>x264.2.log"
+
+    # Video, pass 1
+    os.system(cmdPlay)
+    os.system(cmdPass1)
+
+    # Video, pass 2
+    os.system(cmdPlay)
+    os.system(cmdPass2)
+
+    # Audio, merge from original
     os.system(
         "mkvmerge -o \"" + outputVideo + "\" " +
         "-A \"" + outputVideo + ".video\" " +
