@@ -91,10 +91,10 @@ def main():
     os.system("mkfifo /tmp/fifo")
     cmdPlay = "mplayer -nosound -benchmark -vo yuv4mpeg:file=/tmp/fifo"
     cmdPlay += " '" + inputVideo + "' &"
-    cmdEncodeCommon = "x264 --demuxer y4m --threads auto --pass 1 --bitrate "
+    cmdEncodeCommon = "x264 --demuxer y4m --threads auto --pass %d --bitrate "
     cmdEncodeCommon += str(outputRate)
-    cmdPass1 = cmdEncodeCommon + " -o /dev/null /tmp/fifo 2>x264.1.log"
-    cmdPass2 = cmdEncodeCommon + " -o '" + outputVideo + ".video' " + \
+    cmdPass1 = cmdEncodeCommon%1 + " -o /dev/null /tmp/fifo 2>x264.1.log"
+    cmdPass2 = cmdEncodeCommon%2 + " -o '" + outputVideo + ".video' " + \
         "/tmp/fifo 2>x264.2.log"
 
     # Video, pass 1
