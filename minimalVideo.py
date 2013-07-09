@@ -110,7 +110,7 @@ def main():
         "mkvmerge -o '" + outputVideo + "' " +
         "-A '" + outputVideo + ".video' " +
         "-D '" + inputVideo + "'")
-    os.unlink(outputVideo + ".video'")
+    os.system("rm '" + outputVideo + ".video'")
 
 
 if __name__ == "__main__":
