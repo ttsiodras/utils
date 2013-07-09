@@ -84,8 +84,8 @@ def main():
     if not inputVideo or not outputVideo:
         usage()
 
-    inputVideo = os.path.abspath(inputVideo)
-    outputVideo = os.path.abspath(outputVideo)
+    inputVideo = os.path.abspath(inputVideo).replace("'", "'\"'\"'")
+    outputVideo = os.path.abspath(outputVideo).replace("'", "'\"'\"'")
     outputRate = computeRate(inputVideo)
     os.system("rm -f x264*log* /tmp/fifo")
     os.system("mkfifo /tmp/fifo")
@@ -107,9 +107,9 @@ def main():
 
     # Audio, merge from original
     os.system(
-        "mkvmerge -o \"" + outputVideo + "\" " +
-        "-A \"" + outputVideo + ".video\" " +
-        "-D \"" + inputVideo + "\"")
+        "mkvmerge -o '" + outputVideo + "' " +
+        "-A '" + outputVideo + ".video' " +
+        "-D '" + inputVideo + "'")
     os.unlink(outputVideo + ".video")
 
 
