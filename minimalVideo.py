@@ -87,15 +87,16 @@ def main():
     inputVideo = os.path.abspath(inputVideo).replace("'", "'\"'\"'")
     outputVideo = os.path.abspath(outputVideo).replace("'", "'\"'\"'")
     outputRate = computeRate(inputVideo)
-    os.system("rm -f x264*log* /tmp/fifo")
-    os.system("mkfifo /tmp/fifo")
-    cmdPlay = "mplayer -nosound -benchmark -vo yuv4mpeg:file=/tmp/fifo"
+    pid = str(os.getpid())
+    os.system("rm -f x264*log* /tmp/fifo" + pid)
+    os.system("mkfifo /tmp/fifo" + pid)
+    cmdPlay = "mplayer -nosound -benchmark -vo yuv4mpeg:file=/tmp/fifo" + pid
     cmdPlay += " '" + inputVideo + "' &"
     cmdEncodeCommon = "x264 --demuxer y4m --threads auto --pass %d --bitrate "
     cmdEncodeCommon += str(outputRate)
-    cmdPass1 = cmdEncodeCommon%1 + " -o /dev/null /tmp/fifo 2>x264.1.log"
+    cmdPass1 = cmdEncodeCommon%1 + " -o /dev/null /tmp/fifo" + pid + " 2>x264.1.log"
     cmdPass2 = cmdEncodeCommon%2 + " -o '" + outputVideo + ".video' " + \
-        "/tmp/fifo 2>x264.2.log"
+        "/tmp/fifo" + pid + " 2>x264.2.log"
 
     # Video, pass 1
     os.system(cmdPlay)
@@ -110,7 +111,7 @@ def main():
         "mkvmerge -o '" + outputVideo + "' " +
         "-A '" + outputVideo + ".video' " +
         "-D '" + inputVideo + "'")
-    os.system("rm '" + outputVideo + ".video'")
+    os.system("rm '" + outputVideo + ".video' /tmp/fifo" + pid)
 
 
 if __name__ == "__main__":
