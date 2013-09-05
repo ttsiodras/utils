@@ -4,7 +4,7 @@ If you are able to generate (or filter - grep, sed, awk, etc) a list
 of numbers in your stdout, then just pipe it to this utility, and
 you will get nice, colored statistics:
 
-    $ i in {1..100} ; do echo $i ; done | stats.py
+    $ for i in {1..100} ; do echo $i ; done | stats.py
 
     Statistics :
       Average value: 50.50000
