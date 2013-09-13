@@ -3,8 +3,8 @@
 # Whenever I want to find something in a folder hierarchy,
 # but only for a specific type of files... e.g.:
 #
-#    findIn py '^def.*order'
+#    findIn .py '^def.*order'
 #
 EXTENSION=$1
 shift
-find . -type f -iname '*.'${EXTENSION} -exec grep "$@" '{}' /dev/null \;
+find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \;
