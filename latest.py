@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 This utility shows what files were recently modified, regardless
 of their folder depth. It starts by default on the current folder,

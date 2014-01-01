@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 This utility transcodes any input video file using mplayer and x264,
 encoding it at 0.06 bits per pixel. The result is then muxed by mkvmerge

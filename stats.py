@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 If you are able to generate (or filter - grep, sed, awk, etc) a list
 of numbers in your stdout, then just pipe it to this utility, and

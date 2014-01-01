@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 To be able to perform textual diff on two XML files,
 I needed to sort their attributes and elements.
