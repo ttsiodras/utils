@@ -71,25 +71,29 @@ def main():
 
     target = os.path.abspath(target)
 
-    maxSize = 0
-    completeList = collections.defaultdict(list)
-    for p, dirlist, filelist in os.walk(target):
-        for f in itertools.chain(filelist, dirlist):
-            fullpath = p + os.sep + f
-            try:
-                statdata = os.lstat(fullpath)
-                timestamp = timemodeFunc(statdata)
-                if not S_ISDIR(statdata.st_mode):
-                    si = statdata.st_size
-                    completeList[timestamp].append((fullpath, si))
-                    maxSize = max(maxSize, si)
-            except:
-                pass
+    if sys.platform.startswith("linux"):
+        os.system(
+            'find "{0}" ! -type d -printf "%T+ %11s %p\\n" | sort -n'.format(target))
+    else:
+        maxSize = 0
+        completeList = collections.defaultdict(list)
+        for p, dirlist, filelist in os.walk(target):
+            for f in itertools.chain(filelist, dirlist):
+                fullpath = p + os.sep + f
+                try:
+                    statdata = os.lstat(fullpath)
+                    timestamp = timemodeFunc(statdata)
+                    if not S_ISDIR(statdata.st_mode):
+                        si = statdata.st_size
+                        completeList[timestamp].append((fullpath, si))
+                        maxSize = max(maxSize, si)
+                except:
+                    pass
 
-    span = len(str(maxSize))
-    for k, l in sorted(completeList.items()):
-        for v in l:
-            print "%s %*d %s" % (time.ctime(k), span, v[1], v[0])
+        span = len(str(maxSize))
+        for k, l in sorted(completeList.items()):
+            for v in l:
+                print "%s %*d %s" % (time.ctime(k), span, v[1], v[0])
 
 if __name__ == "__main__":
     main()
