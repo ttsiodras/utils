@@ -17,7 +17,8 @@ import sys
 import time
 import getopt
 import itertools
-from stat import ST_MTIME, ST_CTIME, ST_ATIME, ST_SIZE, ST_MODE, S_ISDIR
+import collections
+from stat import S_ISDIR
 
 
 def usage():
@@ -43,18 +44,19 @@ def main():
     except:
         usage()
 
-    timemode = ST_MTIME
+    timemode = "st_mtime"
     for opt, unused_arg in optlist:
         if opt in ("-h", "--help"):
             usage()
         elif opt in ("-m", "--mtime"):
-            timemode = ST_MTIME
+            timemode = "st_mtime"
         elif opt in ("-a", "--atime"):
-            timemode = ST_ATIME
+            timemode = "st_atime"
         elif opt in ("-c", "--ctime"):
-            timemode = ST_CTIME
+            timemode = "st_ctime"
         else:
             usage()
+    timemodeFunc = lambda x: getattr(x, timemode)
 
     if args:
         if len(args) > 1:
@@ -70,31 +72,24 @@ def main():
     target = os.path.abspath(target)
 
     maxSize = 0
-    completeList = {}
+    completeList = collections.defaultdict(list)
     for p, dirlist, filelist in os.walk(target):
         for f in itertools.chain(filelist, dirlist):
             fullpath = p + os.sep + f
             try:
                 statdata = os.lstat(fullpath)
-                timestamp = statdata[timemode]
-                if S_ISDIR(statdata[ST_MODE]):
-                    completeList.setdefault(
-                        timestamp, []).append((fullpath, -1))
-                else:
-                    completeList.setdefault(
-                        timestamp, []).append((fullpath, statdata[ST_SIZE]))
-                    maxSize = max(maxSize, statdata[ST_SIZE])
+                timestamp = timemodeFunc(statdata)
+                if not S_ISDIR(statdata.st_mode):
+                    si = statdata.st_size
+                    completeList[timestamp].append((fullpath, si))
+                    maxSize = max(maxSize, si)
             except:
                 pass
 
     span = len(str(maxSize))
-    #empty = span*" "
     for k, l in sorted(completeList.items()):
         for v in l:
-            if v[1] == -1:  # Folder, I care not
-                pass  # print "%s %s %s/" % (time.ctime(k), empty, v[0])
-            else:
-                print "%s %*d %s" % (time.ctime(k), span, v[1], v[0])
+            print "%s %*d %s" % (time.ctime(k), span, v[1], v[0])
 
 if __name__ == "__main__":
     main()
