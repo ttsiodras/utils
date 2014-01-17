@@ -8,5 +8,5 @@ This is a quick hack to dump error logs written in e.g. PHP error logs
 import sys
 f = open(sys.argv[1]) if len(sys.argv)>1 else sys.stdin
 for line in f.readlines():
-    exec("hack='" + line.strip() + "'")
-    sys.stdout.write(hack)
+    exec("hack='" + line.strip().replace("'", "''") + "'")
+    sys.stdout.write(hack + "\n")
