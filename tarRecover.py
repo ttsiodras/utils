@@ -12,6 +12,7 @@ import re
 import sys
 import getopt
 import string
+from misc import panic
 
 
 def usage():
@@ -37,11 +38,6 @@ and optional ones:
 
 For issues/suggestions, contact Thanassis Tsiodras (ttsiodras@gmail.com)
 '''.format(appName=os.path.basename(sys.argv[0]))
-    sys.exit(1)
-
-
-def panic(x):
-    sys.stderr.write(x)
     sys.exit(1)
 
 
@@ -122,9 +118,9 @@ def main():
             if ustarIdx + 255 > sectorLength:
                 sectorData += f.read(512)
                 sectorLength = len(sectorData)
-            if sectorData[headerIdx+107] != chr(0) or \
-                    sectorData[headerIdx+115] != chr(0) or \
-                    sectorData[headerIdx+123] != chr(0):
+            if sectorData[headerIdx + 107] != chr(0) or \
+                    sectorData[headerIdx + 115] != chr(0) or \
+                    sectorData[headerIdx + 123] != chr(0):
                 continue
 
             # Extract filename from header
@@ -138,12 +134,12 @@ def main():
 
             # Extract file size from header
             try:
-                foSize = int(sectorData[ustarIdx-133:ustarIdx-133+11], 8)
+                foSize = int(sectorData[ustarIdx - 133:ustarIdx - 133 + 11], 8)
             except:
                 continue
             if foSize == 0:
                 print "Ignoring link/folder", filename, "(size: 0 bytes)"
-                sectorData = sectorData[ustarIdx+1:]
+                sectorData = sectorData[ustarIdx + 1:]
                 preReadSector = True
                 continue
 
@@ -156,12 +152,12 @@ def main():
                 if '/' in filename:
                     os.system("mkdir -p " + re.sub(r'/[^/]*$', '', filename))
                 fo = open(filename, 'wb')
-                lenToWrite = min(foSize, sectorLength - (ustarIdx+255))
+                lenToWrite = min(foSize, sectorLength - (ustarIdx + 255))
                 fo.write(
-                    sectorData[ustarIdx+255:ustarIdx+255+lenToWrite])
+                    sectorData[ustarIdx + 255:ustarIdx + 255 + lenToWrite])
                 writtenSoFar = lenToWrite
                 while writtenSoFar < foSize:
-                    buf = f.read(min(65536, foSize-writtenSoFar))
+                    buf = f.read(min(65536, foSize - writtenSoFar))
                     writtenSoFar += len(buf)
                     fo.write(buf)
                 fo.close()

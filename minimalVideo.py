@@ -10,17 +10,7 @@ Thanks to x264, the result is an optimal balance between size and quality.
 import os
 import sys
 import getopt
-
-
-def panic(msg):
-    '''Print error message and abort'''
-    if not msg.endswith('\n'):
-        msg += "\n"
-    if sys.stdout.isatty():
-        sys.stderr.write("\n"+chr(27)+"[32m" + msg + chr(27) + "[0m\n")
-    else:
-        sys.stderr.write(msg)
-    sys.exit(1)
+from misc import panic
 
 
 def usage():
@@ -55,7 +45,7 @@ def computeRate(inputVideo):
     for key in keys:
         if key not in values.keys():
             panic("Failed to find %s for %s" % (key, inputVideo))
-    return int(0.06*reduce(lambda x, y: x*y, values.values())/1000.0)
+    return int(0.06 * reduce(lambda x, y: x * y, values.values()) / 1000.0)
 
 
 def main():
@@ -94,8 +84,9 @@ def main():
     cmdPlay += " '" + inputVideo + "' &"
     cmdEncodeCommon = "x264 --demuxer y4m --threads auto --pass %d --bitrate "
     cmdEncodeCommon += str(outputRate)
-    cmdPass1 = cmdEncodeCommon%1 + " -o /dev/null /tmp/fifo" + pid + " 2>x264.1.log"
-    cmdPass2 = cmdEncodeCommon%2 + " -o '" + outputVideo + ".video' " + \
+    cmdPass1 = cmdEncodeCommon % 1 + " -o /dev/null " + \
+        "/tmp/fifo" + pid + " 2>x264.1.log"
+    cmdPass2 = cmdEncodeCommon % 2 + " -o '" + outputVideo + ".video' " + \
         "/tmp/fifo" + pid + " 2>x264.2.log"
 
     # Video, pass 1
