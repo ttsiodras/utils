@@ -5,6 +5,7 @@
 #
 #    findIn .py '^def.*order'
 #
-EXTENSION=$1
+EXTENSION=$(echo "$1" | sed 's/\./\\./g')
 shift
-find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \;
+#find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \;
+sag -G ".*${EXTENSION}" "$@"
