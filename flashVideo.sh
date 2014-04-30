@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# Fetch flash video currently shown in my browser.
+#
 if [ $# -ne 1 ] ; then
     echo Usage: $0 filenameToSave
     exit 1

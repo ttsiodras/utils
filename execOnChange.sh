@@ -1,5 +1,11 @@
 #!/bin/bash
- 
+#
+# Usage:
+#     execOnChange.sh "some command with params" "-iname ..."
+#
+# Anything that matches the find filespec changes? Run the cmd.
+# (i.e. instant make)
+#
 command="$1"
 shift
 fileSpec="$@"
