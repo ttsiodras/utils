@@ -24,5 +24,5 @@ print "Password:",
 password = raw_input()
 for c in password:
     s = hex(85 ^ (ord(c)))
-    sys.stdout.write(s[2:])
+    sys.stdout.write(s[2:]+":")
 print
