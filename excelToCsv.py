@@ -10,14 +10,18 @@ import re
 import sys
 from xlrd import open_workbook
 
-# The plugin that loads the blob into the DB
+stripStupidIntSuffixes = re.compile(r'\.0$')
+
+def stripStupidIntSuffix(x):
+    return stripStupidIntSuffixes.sub(u'', x)
+
 
 def ProcessSheets(sheet):
-    stripStupidVatSuffixes = re.compile(r'\.[0-9]*$')
     for rowIndex in xrange(0, sheet.nrows):
         sys.stdout.write(
             u";".join(
-                unicode(sheet.cell(rowIndex, colIndex).value)
+                stripStupidIntSuffix(
+                    unicode(sheet.cell(rowIndex, colIndex).value))
                 for colIndex in xrange(0, sheet.ncols)))
         print
 
