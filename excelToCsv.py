@@ -27,7 +27,7 @@ def ProcessSheets(sheet):
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print "Usage:", os.path.basename(sys.argv[0]), " file.xls(x) ..."
         sys.exit(1)
 
