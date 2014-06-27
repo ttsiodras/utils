@@ -19,10 +19,10 @@ def stripStupidIntSuffix(x):
 def ProcessSheets(sheet):
     for rowIndex in xrange(0, sheet.nrows):
         sys.stdout.write(
-            u";".join(
+            (u";".join(
                 stripStupidIntSuffix(
                     unicode(sheet.cell(rowIndex, colIndex).value))
-                for colIndex in xrange(0, sheet.ncols)))
+                for colIndex in xrange(0, sheet.ncols))).encode('utf-8'))
         print
 
 
