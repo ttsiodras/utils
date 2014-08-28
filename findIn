@@ -7,5 +7,5 @@
 #
 EXTENSION=$(echo "$1" | sed 's/\./\\./g')
 shift
-#find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \;
-sag -G ".*${EXTENSION}" "$@"
+find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \;
+#sag -G ".*${EXTENSION}" "$@"
