@@ -6,6 +6,10 @@
 # Anything that matches the find filespec changes? Run the cmd.
 # (i.e. instant make)
 #
+if [ $# -ne 2 ] ; then 
+    echo 'Usage: execOnChange.sh "some command with params" "-iname ..."'
+    exit 1
+fi
 command="$1"
 shift
 fileSpec="$@"
