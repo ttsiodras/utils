@@ -18,7 +18,9 @@ if [ ! -d /proc/$1 ] ; then
     echo There is no such PID
     exit 1
 fi
-if [ $(realpath /proc/$1/exe) != "/bin/bash" ] ; then
+if [ $(realpath /proc/$1/exe) != "/bin/bash" -a \
+     $(realpath /proc/$1/exe) != "/usr/bin/bash" -a \
+     $(realpath /proc/$1/exe) != "/usr/local/bin/bash" ] ; then
     echo This is not a bash PID
     exit 1
 fi
