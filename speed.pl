@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 #
 # If you are downloading a file via youtube-dl or FTP or SCP or
-# any other fancy protocol, this script can ack as a progress
+# any other fancy protocol, this script can act as a progress
 # and speed indicator - just 
 #
 #     speed.pl filename
