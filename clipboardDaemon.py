@@ -20,12 +20,13 @@ getState = lambda: make_state(os.popen(getX).read(), os.popen(getClip).read())
 state = getState()
 while True:
     newState = getState()
+    print newState
     if newState.xwin != state.xwin:
         print "Syncing X to clipboard"
-        os.system(getX + "|awk 1|" + setClip)
+        os.system(getX + "|perl -i -p0777we's/\n\z//'|" + setClip)
         state = getState()
     elif newState.clipboard != state.clipboard:
         print "Syncing clipboard to X"
-        os.system(getClip + "|awk 1|" + setX)
+        os.system(getClip + "|perl -i -p0777we's/\n\z//'|" + setX)
         state = getState()
     time.sleep(0.25)
