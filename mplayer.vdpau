@@ -1,0 +1,9 @@
+#!/bin/bash
+#
+# If using a VAAPI machine and not an NVIDIA one, install...
+#
+#   libva-intel-driver
+#   libvdpau-va-gl
+#
+# ...and then use this script to play H264 videos with HW accel.
+mplayer  -vo vdpau -vc ffh264vdpau "$@"
