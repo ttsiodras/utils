@@ -27,14 +27,14 @@ while True:
     newState = getState()
     if debug:
         print "newState:", newState
-    if newState.xwin != state.xwin:
+    if newState.xwin != state.xwin and newState.xwin != '':
         print newState
         print "Syncing X to clipboard"
         # The perl below strips the last newline
         os.system(
             getX + r"|perl -i -p0777we's/\n\z//'|" + setClip)
         state = getState()
-    elif newState.clipboard != state.clipboard:
+    elif newState.clipboard != state.clipboard and newState.clipboard != '':
         print newState
         print "Syncing clipboard to X"
         # The perl below strips the last newline
