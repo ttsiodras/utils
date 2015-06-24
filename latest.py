@@ -72,8 +72,14 @@ def main():
     target = os.path.abspath(target)
 
     if sys.platform.startswith("linux"):
+        special_char = {
+            'st_mtime': 'T',
+            'st_ctime': 'C',
+            'st_atime': 'A'
+        }[timemode]
         os.system(
-            'find "{0}" ! -type d -printf "%T+ %11s %p\\n" | sort -n'.format(target))
+            'find "{0}" ! -type d -printf "%{1}+ %11s %p\\n" | sort -n'.format(
+                target, special_char))
     else:
         maxSize = 0
         completeList = collections.defaultdict(list)
