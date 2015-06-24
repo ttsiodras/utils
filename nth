@@ -1,0 +1,10 @@
+#!/usr/bin/env python2
+"""
+I am tired of piping to awk '{print $NF}' or '{print $3}' or ...
+
+Just pipe to 'nth <index>' - and since this is python, -1 -2 etc work.
+"""
+import sys
+column = int(sys.argv[1])
+for line in sys.stdin.readlines():
+    print line.strip().split()[column]
