@@ -23,7 +23,7 @@ while (1) {
     $cnt++;
     my $newSize = -s $ARGV[0];
     $total += $newSize - $oldSize;
-    print sprintf("Size: %12u bytes,    speed: %12u bytes/sec    (avg: %12u bytes/sec)\n", -s $ARGV[0], $newSize-$oldSize, int($total/$cnt));
+    print sprintf("Size: %9u KB,    speed: %9u KB/sec    (avg: %9u KB/sec)\n", ( -s $ARGV[0])/1024, ($newSize-$oldSize)/1024, int($total/$cnt/1024));
     if ($newSize == $oldSize) {
 	$noData++;
 	print "Stalling... Waiting for $noData seconds...\n";
