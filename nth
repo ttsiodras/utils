@@ -7,4 +7,7 @@ Just pipe to 'nth <index>' - and since this is python, -1 -2 etc work.
 import sys
 column = int(sys.argv[1])
 for line in sys.stdin.readlines():
-    print line.strip().split()[column]
+    try:
+        print line.strip().split()[column]
+    except:
+        pass
