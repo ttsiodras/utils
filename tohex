@@ -1,0 +1,5 @@
+#!/bin/bash
+while read line
+do
+    echo -e "obase=16\n$line\n" | bc -l
+done < "${1:-/dev/stdin}"
