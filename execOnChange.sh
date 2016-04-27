@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # Usage:
-#     execOnChange.sh "some command with params" "-iname ..."
+#     execOnChange.sh "some command with params" "-iname *.md"
 #
 # Anything that matches the find filespec changes? Run the cmd.
-# (i.e. instant make)
+# (i.e. instant make-like reacting on file changes)
 #
 if [ $# -ne 2 ] ; then 
     echo 'Usage: execOnChange.sh "some command with params" "-iname ..."'
@@ -18,11 +18,15 @@ sentinel=/tmp/t.$$
 touch -t197001010000 $sentinel
 while :
 do
-    files=$(find . -newer $sentinel -a '(' $fileSpec ')')
+    set -f
+    files=$(find . -type f -newer $sentinel -a \( $fileSpec \) )
     if [ $? != 0 ]; then
         exit 1;
     fi
-    if [ "$files" != "" ]; then
+    set +f
+    if [ ! -z "$files" ]; then
+        echo Changed: $files
+        echo Executing $command ...
         $command
         touch $sentinel
     fi
