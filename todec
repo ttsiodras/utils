@@ -1,6 +1,6 @@
 #!/bin/bash
 while read line
 do
-    VAL=$(echo "$line" | sed 's,^0x,,' | tr '[a-z]' '[A-Z]')
+    VAL=$(echo -e "$line\n" | sed 's,^0x,,' | tr '[a-z]' '[A-Z]')
     echo -e "ibase=16\n$VAL\n" | bc -l
 done < "${1:-/dev/stdin}"
