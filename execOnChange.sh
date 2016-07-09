@@ -25,9 +25,9 @@ do
     fi
     set +f
     if [ ! -z "$files" ]; then
-        echo Changed: $files
-        echo Executing $command ...
-        $command
+        echo -e "\nChanged:" $files
+        echo -e "Executing $command ..."
+        bash -c "$command"
         touch $sentinel
     fi
     sleep 0.1
