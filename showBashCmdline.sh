@@ -3,7 +3,7 @@
 # Show the currently executing command line inside a bash shell.
 #
 # Relevant blog post:
-#    http://users.softlab.ece.ntua.gr/~ttsiod/bashheimer.html
+#    https://www.thanassis.space/bashheimer.html
 #
 if [ $# -ne 1 ] ; then
     echo Usage: $0 BASH_PID

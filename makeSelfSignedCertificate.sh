@@ -14,7 +14,7 @@ echo Athens
 echo Semantix Information Technologies
 echo Software Development
 echo $1
-echo ttsiodras@semantix.gr
+echo ttsiodras@gmail.com
 echo
 echo Here you GO...
 echo
