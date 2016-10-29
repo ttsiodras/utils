@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# OBSOLETE - just use Let's Encrypt
+#
 if [ $# -ne 1 ] ; then
         echo Usage: $0 www.domain.com
         exit 1
