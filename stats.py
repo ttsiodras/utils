@@ -72,6 +72,7 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
                 else 0.5*(srted[samplesNo/2 - 1] + srted[samplesNo/2])),
             ("Min", srted[0]),
             ("Max", srted[-1]),
+            ("Samples", samplesNo),
             (g_green+"Overall", (str(total/n)+" +/- "+"%2.1f%%"+g_normal) %
                 ((100*math.sqrt(variance)*n/total) if total > 0 else 0.))
         ]
