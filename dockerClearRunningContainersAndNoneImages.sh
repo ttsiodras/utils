@@ -2,5 +2,11 @@
 #
 # Must cleanup after my containers/images cruft
 #
-docker rm $(docker ps -a -q)
-docker rmi $(docker images | grep ^.none | awk '{print $3}')
+docker ps -a -q | while read ANS ; do
+    echo "Removing $ANS"
+    docker rm $ANS
+done
+docker images | grep ^.none | awk '{print $3}' | while read ANS ; do
+    echo Removing $ANS
+    docker rmi $ANS
+done
