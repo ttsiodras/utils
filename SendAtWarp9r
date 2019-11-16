@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+# Fastest, hassle-free transfer of files:
+# On the receiving end, run 'ReceiveAtWarp9r'.
+# On the sending end, run this script.
+#
+if [ $# -lt 1 ] ; then
+	echo Usage: SendAtWarp9r files_or_folders_list
+	exit 0;
+fi
+tar cf - "$@" | lzop -c -1 | nc -l -p 9656
