@@ -30,4 +30,5 @@ echo -n Exclude this or Ctrl-D ...
 while read -r ANS ; do
     [ -z "$GR" ] && GR="$ANS" || GR="$GR|$ANS"
     grep -E -v "$GR" "$DATA" | tail -40
+    echo "-v $GR $DATA" > /dev/shm/filter
 done ) <&1

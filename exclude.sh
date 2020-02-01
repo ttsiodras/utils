@@ -15,4 +15,5 @@ echo -n Exclude this or Ctrl-D ...
 while read ANS ; do
     [ -z "$GR" ] && GR="$ANS" || GR="$GR|$ANS"
     egrep -v "$GR" "$1" | tail -40
+    echo "-v $GR $1" > /dev/shm/filter
 done
