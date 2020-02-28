@@ -1,18 +1,29 @@
 #!/bin/bash
 #
 # Whenever I want to find something in a folder hierarchy,
-# but only for a specific type of files... e.g.:
+# but only for a specific type of files...
+#
+# e.g.:
 #
 #    findIn .py '^def.*order'
 #
-EXTENSION=$(echo "$1" | sed 's/\./\\./g')
+# or
+#
+#    findIn '.[ch]' '^void'
+#
+
+EXTENSION="$(echo "$1" | sed 's/\./\\./g')"
 shift
-# If output goes to a tty, don't wrap around
+
+# If output goes to a tty, I don't want a wrap around, but I do want colors
 if [ -t 1 ] ; then
-    [ -z "$COLUMNS" ] && COLUMNS=$(tput cols)
-    CUT_CMD="cut -c1-$COLUMNS"
+    COLORS="always"
+    tput rmam  # Stop wrapping
 else
-    CUT_CMD="cat"
+    COLORS="none"
 fi
-find . -type f -iname '*'${EXTENSION} -exec grep --color=auto "$@" '{}' /dev/null \; 2>/dev/null | $CUT_CMD
+find . -type f -iname '*'${EXTENSION} -exec grep --color="$COLORS" "$@" '{}' /dev/null \; 2>/dev/null
+if [ -t 1 ] ; then
+    tput smam  # Reset wrapping
+fi
 #sag -G ".*${EXTENSION}" "$@"
