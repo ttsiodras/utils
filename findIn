@@ -11,6 +11,14 @@
 #
 #    findIn '.[ch]' '^void'
 #
+# To make a case-insensitive search, pass "-i" in front (before the extension)
+
+if [ "$1" == "-i" ] ; then
+    CASE="-i"
+    shift
+else
+    CASE=""
+fi
 
 EXTENSION="$(echo "$1" | sed 's/\./\\./g')"
 shift
@@ -22,7 +30,7 @@ if [ -t 1 ] ; then
 else
     COLORS="none"
 fi
-find . -type f -iname '*'${EXTENSION} -exec grep --color="$COLORS" "$@" '{}' /dev/null \; 2>/dev/null
+find . -type f -iname '*'"${EXTENSION}" -exec grep ${CASE} --color="$COLORS" -- "$@" '{}' /dev/null \; 2>/dev/null
 if [ -t 1 ] ; then
     tput smam  # Reset wrapping
 fi
