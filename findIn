@@ -12,15 +12,49 @@
 #    findIn '.[ch]' '^void'
 #
 # To make a case-insensitive search, pass "-i" in front (before the extension)
+# To make a whole-word search, pass "-w" in front (before the extension)
 
-if [ "$1" == "-i" ] ; then
-    CASE="-i"
-    shift
-else
-    CASE=""
-fi
+usage() {
+    echo -e "Usage: $0 [-h] [-i] [-w] .extension regexp"
+    echo -e "Where:"
+    echo -e "\t-h\t\tshow this help"
+    echo -e "\t-w\t\tperform word-boundary search"
+    echo -e "\t-i\t\tperform case insensitive search"
+    echo -e "\t-n\t\tshow line numbers in results"
+    echo -e "\t.extension\tthe file extension to search in (e.g. .c, .py, etc)"
+    echo -e "\tregexp\t\tthe regular expression to search for"
+    exit 1
+}
+
+[ $# -eq 0 ] && usage
+
+CASE=""
+WORD=""
+LINENOS=""
+while getopts "iwhn" o ; do
+    case "${o}" in 
+        h)
+            usage
+            ;;
+        i)
+            CASE="-i"
+            ;;
+        w)
+            WORD="-w"
+            ;;
+        n)
+            LINENOS="-n"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+            
+shift $((OPTIND-1))
 
 EXTENSION="$(echo "$1" | sed 's/\./\\./g')"
+
 shift
 
 # If output goes to a tty, I don't want a wrap around, but I do want colors
@@ -30,8 +64,12 @@ if [ -t 1 ] ; then
 else
     COLORS="none"
 fi
-find . -type f -iname '*'"${EXTENSION}" -exec grep ${CASE} --color="$COLORS" -- "$@" '{}' /dev/null \; 2>/dev/null
+
+# Go fetch!
+find . -type f -iname '*'"${EXTENSION}" -exec \
+    grep ${CASE} ${WORD} ${LINENOS} --color="$COLORS" -- "$@" '{}' /dev/null \; 2>/dev/null
+
+# Reset wrapping
 if [ -t 1 ] ; then
-    tput smam  # Reset wrapping
+    tput smam
 fi
-#sag -G ".*${EXTENSION}" "$@"
