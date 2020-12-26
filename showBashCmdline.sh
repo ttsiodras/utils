@@ -19,7 +19,7 @@ if [[ $STATNAME != */bin/bash* ]] ; then
     exit 1
 fi
 gdb --pid $1 /proc/$1/exe >/dev/null 2>&1 <<OEF
-call write_history("/tmp/bash_history_recover")
+call (int) write_history("/tmp/bash_history_recover")
 detach
 q
 OEF
