@@ -2,7 +2,7 @@
 LAST_URL=""
 while true
 do
-    URL="$(timeout 2 xclip -o 2>/dev/null | grep ^htt | egrep 'youtube.com|framatube|vimeo.com|youtu.be|192.168.8.175' )" 
+    URL="$(timeout 2 xclip -o 2>/dev/null | grep ^htt | egrep 'youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi' )" 
     [ ! -z "$URL" ] && [ "$LAST_URL" != "$URL" ] && {
         LAST_URL="$URL"
         echo '[-] Got URL: '"$URL"
