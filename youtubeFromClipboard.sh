@@ -22,14 +22,15 @@ do
             echo "" | timeout 2 xclip 
             TST="$(timeout 2 xclip -o 2>/dev/null)"
             [ "${TST}" == "" ] && break
-            sleep 0.1
+            sleep 0.3
         done
         echo '[-] Clipboard cleaned, playing video...'
         echo "$URL"  > /dev/shm/last_video
-        WORKSPACE=$(i3-msg -t  get_workspaces |  jq 'map([.num, .visible])' | grep -B1 true | head -1 | sed 's/[, ]*//g')
-        i3-msg 'workspace 9; exec xterm -e mpv -fs "'"$URL"'"'
-        sleep 1
-        i3-msg "workspace ${WORKSPACE}"
+        # WORKSPACE=$(i3-msg -t  get_workspaces |  jq 'map([.num, .visible])' | grep -B1 true | head -1 | sed 's/[, ]*//g')
+        # i3-msg 'workspace 9; exec xterm -e mpv -fs "'"$URL"'"'
+        # sleep 0.3
+        # i3-msg "workspace ${WORKSPACE}"
+        mpv -fs "$URL" &
         continue
     }
     echo "$URL" | grep "^zathura: http" >/dev/null && {
