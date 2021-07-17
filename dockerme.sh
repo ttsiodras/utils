@@ -15,6 +15,7 @@ usage() {
     exit 1
 }
 
+rm -f /tmp/.docker.xauth*
 XAUTH=/tmp/.docker.xauth
 XSOCK=/tmp/.X11-unix
 DRI=/dev/dri/card0
