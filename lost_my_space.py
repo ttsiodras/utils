@@ -62,6 +62,7 @@ def main():
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, _ = proc.communicate()
         all_files = pickle.loads(stdout)
+        changes = [0, 0]
 
         def action_compare(fullpath):
             try:
@@ -71,15 +72,18 @@ def main():
                     try:
                         if size == all_files[fullpath]:
                             return
-                        print("%11d [C] (%d) %s" % (
-                            size, size-all_files[fullpath], fullpath))
+                        delta = size-all_files[fullpath]
+                        print("%11d [C] (%d) %s" % (size, delta, fullpath))
+                        changes[0] += delta
                     except KeyError:
                         print("%11d [N] %s" % (size, fullpath))
+                        changes[1] += size
             except Exception:
                 pass
         print("[-] Comparing with current...", file=sys.stderr)
         visit_fs(action_compare)
-
+        print("[-] Due to new files:      %d" % changes[1], file=sys.stderr)
+        print("[-] Due to modified files: %d" % changes[0], file=sys.stderr)
 
 if __name__ == "__main__":
     main()
