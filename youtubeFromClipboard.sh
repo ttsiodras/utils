@@ -1,6 +1,6 @@
 #!/bin/bash
 LAST_URL=""
-SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi'
+SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi|odysee.com'
 
 while true
 do
