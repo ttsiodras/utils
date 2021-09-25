@@ -1,0 +1,60 @@
+#!/usr/bin/perl
+#
+# When I want to compare two folders and remove the identical
+# files from the first one, I invoke this.
+#
+# Combined with cp -al, this is surprisingly powerful.
+#
+use File::Basename;
+use Digest::MD5;
+
+sub md5 {
+    my $filename = $_[0];
+    open FILE, $filename;
+    binmode(FILE);
+    my $ctx = Digest::MD5->new;
+    $ctx->addfile(*FILE);
+    close FILE;
+    return $ctx->hexdigest;
+}
+
+die "Usage: $0 <dirWithFilesToBeRemoved> <dirWithReferenceFiles>\n"
+    unless @ARGV == 2;
+
+my $DirWithFilesToBeRemoved=$ARGV[0];
+die "Arg1 is not a folder...\n" unless -d $DirWithFilesToBeRemoved;
+my $DirWithFilesToBeUsedAsReference=$ARGV[1];
+die "Arg2 is not a folder...\n" unless -d $DirWithFilesToBeUsedAsReference;
+
+my @stat1 = stat($DirWithFilesToBeRemoved);
+my @stat2 = stat($DirWithFilesToBeUsedAsReference);
+
+# The folders must either have different inodes or exist in different devices
+if ($stat1[0] == $stat2[0]) {
+    die "Use Different dirs!\n" unless $stat1[1] != $stat2[1];
+}
+
+# find identical files in DirWithFilesToBeRemoved/ToBeUsedAsReference
+# and remove them from DirWithFilesToBeRemoved
+open F, "find \"$DirWithFilesToBeRemoved\" -type f|"
+    or die "can't run 'find $DirWithFilesToBeRemoved -type f' !";
+while (my $file=<F>) {
+    chomp $file;
+    $oldName = $file;
+    $oldName =~ s/^$DirWithFilesToBeRemoved/$DirWithFilesToBeUsedAsReference/g;
+    @oldNameStat = stat($oldName);
+    @fileStat = stat($file);
+    if (($oldNameStat[0] == $fileStat[0]) && ($oldNameStat[1] == $fileStat[1])) {
+        # same hard link, no need to compare anything
+        unlink "$file";
+    } elsif ( -l "$file" ) {
+        #unlink "$file";
+    } elsif ( ! -e "$oldName" ) {
+        # printf("%s is a new file!\n", basename $file);
+    } elsif (( -s "$file" ) == ( -s "$oldName" )) {
+        if ($oldNameStat[9] == $fileStat[9]) {
+            printf("Removing %s\n", $file);
+            unlink "$file";
+        }
+    }
+}
