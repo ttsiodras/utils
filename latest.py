@@ -28,6 +28,7 @@ Usage: {mainApp} <options> <folderToScan>
 where folderToScan is . by default, and options can be:
 
     -h, --help      show this help message
+    -l, --nosymlink ignore symlinks
     -m, --mtime     order by modification time (default)
     -a, --atime     order by access time
     -c, --ctime     order by ctime (creation time under Windows,
@@ -40,14 +41,18 @@ def main():
     try:
         args = sys.argv[1:]
         optlist, args = getopt.gnu_getopt(
-            args, "hmac", ['help', 'mtime', 'atime', 'ctime'])
+            args, "hlmac", [
+                'help', 'nosymlink', 'mtime', 'atime', 'ctime'])
     except:
         usage()
 
     timemode = "st_mtime"
+    skip_symlinks = False
     for opt, unused_arg in optlist:
         if opt in ("-h", "--help"):
             usage()
+        elif opt in ("-l", "--nosymlink"):
+            skip_symlinks = True
         elif opt in ("-m", "--mtime"):
             timemode = "st_mtime"
         elif opt in ("-a", "--atime"):
@@ -77,9 +82,12 @@ def main():
             'st_ctime': 'C',
             'st_atime': 'A'
         }[timemode]
+        cmd = 'find "{0}" ! -type d '.format(target)
+        if skip_symlinks:
+            cmd += ' ! -type l '
         os.system(
-            'find "{0}" ! -type d -printf "%{1}+ %11s %p\\n" | sort -n'.format(
-                target, special_char))
+            cmd + '-printf "%{0}+ %11s %p\\n" | sort -n'.format(
+                special_char))
     else:
         maxSize = 0
         completeList = collections.defaultdict(list)
