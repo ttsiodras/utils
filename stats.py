@@ -81,7 +81,7 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
             if isinstance(value, str):
                 print value
             else:
-                print "%.5f" % value
+                print "%.9f" % value
 
 
 def readListOfIntegersOrFloatsFromStdin():
