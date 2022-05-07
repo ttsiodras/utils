@@ -28,7 +28,7 @@ Usage: {mainApp} <options> <folderToScan>
 where folderToScan is . by default, and options can be:
 
     -h, --help      show this help message
-    -l, --nosymlink ignore symlinks
+    -l, --symlinks  show symlinks
     -m, --mtime     order by modification time (default)
     -a, --atime     order by access time
     -c, --ctime     order by ctime (creation time under Windows,
@@ -47,12 +47,12 @@ def main():
         usage()
 
     timemode = "st_mtime"
-    skip_symlinks = False
+    show_symlinks = False
     for opt, unused_arg in optlist:
         if opt in ("-h", "--help"):
             usage()
-        elif opt in ("-l", "--nosymlink"):
-            skip_symlinks = True
+        elif opt in ("-l", "--symlinks"):
+            show_symlinks = True
         elif opt in ("-m", "--mtime"):
             timemode = "st_mtime"
         elif opt in ("-a", "--atime"):
@@ -83,7 +83,7 @@ def main():
             'st_atime': 'A'
         }[timemode]
         cmd = 'find "{0}" ! -type d '.format(target)
-        if skip_symlinks:
+        if not show_symlinks:
             cmd += ' ! -type l '
         os.system(
             cmd + '-printf "%{0}+ %11s %p\\n" | sort -n'.format(
