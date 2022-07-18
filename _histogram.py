@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # Copyright 2010 Bitly
@@ -105,7 +105,7 @@ def load_stream(input_stream, agg_value_key, agg_key_value):
                 yield DataPoint(Decimal(clean_line), 1)
         except:
             logging.exception('failed %r', line)
-            print >>sys.stderr, "invalid line %r" % line
+            print("invalid line %r" % line, file=sys.stderr)
 
 
 def median(values, key=None):
@@ -113,9 +113,9 @@ def median(values, key=None):
         key = None  # map and sort accept None as identity
     length = len(values)
     if length % 2:
-        median_indeces = [length/2]
+        median_indeces = [length//2]
     else:
-        median_indeces = [length/2-1, length/2]
+        median_indeces = [length//2-1, length//2]
 
     values = sorted(values, key=key)
     return sum(map(key,
@@ -260,15 +260,15 @@ def histogram(stream, options):
         bucket_count = bucket_counts[bucket]
         star_count = 0
         if bucket_count:
-            star_count = bucket_count / bucket_scale
+            star_count = bucket_count // bucket_scale
         if options.percentage:
             pct = (100 * Decimal(bucket_count) / Decimal(samples))
             if star_count > 0:
                 percentage = " (%0.2f%%)" % pct
             else:
                 percentage = ""
-        print format_string % (bucket_min, bucket_max, bucket_count, options.dot *
-                               star_count, percentage)
+        print(format_string % (bucket_min, bucket_max, bucket_count, options.dot *
+                               star_count, percentage))
 
 
 if __name__ == "__main__":
@@ -305,7 +305,7 @@ if __name__ == "__main__":
     if sys.stdin.isatty():
         # if isatty() that means it's run without anything piped into it
         parser.print_usage()
-        print "for more help use --help"
+        print("for more help use --help")
         sys.exit(1)
     histogram(load_stream(sys.stdin, options.agg_value_key,
                           options.agg_key_value), options)
