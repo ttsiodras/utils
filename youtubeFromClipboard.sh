@@ -1,6 +1,6 @@
 #!/bin/bash
 LAST_URL=""
-SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi|odysee.com'
+SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi|odysee.com|192.168.8.150'
 
 while true
 do
@@ -30,7 +30,7 @@ do
         # i3-msg 'workspace 9; exec xterm -e mpv -fs "'"$URL"'"'
         # sleep 0.3
         # i3-msg "workspace ${WORKSPACE}"
-        mpv -fs "$URL" &
+        sudo su - crap bash -c "mpv -fs \"$URL\""
         continue
     }
     echo "$URL" | grep "^zathura: http" >/dev/null && {
