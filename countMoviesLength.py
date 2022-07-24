@@ -13,7 +13,7 @@ from concurrent import futures
 def getMovieLength(filename):
     if not os.path.isfile(os.path.realpath(filename)):
         return filename, 0.
-    cmd = "mplayer -nosound -quiet -identify -frames 0 -vo null "
+    cmd = "mplayer -quiet -identify -frames 0 -vo null "
     cmd += "\"%s\" 2>/dev/null | grep LENGTH" % filename
     try:
         return filename, float(os.popen(cmd).readlines()[0].split('=')[1])
