@@ -1,50 +1,59 @@
-#!/usr/bin/env python2
-'''
-If you are able to generate (or filter - grep, sed, awk, etc) a list
-of numbers in your stdout, then just pipe it to this utility, and
-you will get nice, colored statistics in real-time, for every
-sample that arrives:
+#!/usr/bin/env python3
+"""
+Observe mean and stddev of input data coming over stdin.
 
-    $ for i in {1..100} ; do echo $i ; sleep 1 ; done | statsLive.py
+$ for i in {1..10} ; do echo $i ; sleep 1 ; done | \
+        ./incremental_stats.py 5
 
-'''
+The optional argument indicates number of fractional digits.
+
+"""
+import sys
 import math
 
-from sys import stdout
-
-# Colored message ANSI constants
-g_green = chr(27) + "[32m" if stdout.isatty() else ""
-g_yellow = chr(27) + "[33m" if stdout.isatty() else ""
-g_normal = chr(27) + "[0m" if stdout.isatty() else ""
+# From: https://en.wikipedia.org/wiki/\
+#       Algorithms_for_calculating_variance#Welford's_online_algorithm
 
 
-def printStatsOfList(results, label='Statistics', summaryOnly=False):
-    total = totalSq = n = 0
-    for a in results:
-        total += a
-        totalSq += a*a
-        n += 1
-        varianceFull = (totalSq - total*total/n)/n
-        if varianceFull < 0.:
-            varianceFull = 0.
-        if n > 1:
-            variance = (totalSq - total*total/n)/(n-1)
-            if variance < 0.:
-                variance = 0.
-        else:
-            variance = 0.
-        s = g_green + ("%6.2f" % (total/n)) + " +/- " + "%6.2f%%\n" + g_normal
-        stdout.write(s % ((100*math.sqrt(variance)*n/total) if total > 0 else 0.),)
-        stdout.flush()
+# For a new value newValue, compute the new count, new mean, the new M2.
+# mean accumulates the mean of the entire dataset
+# M2 aggregates the squared distance from the mean
+# count aggregates the number of samples seen so far
+def update(existingAggregate, newValue):
+    count, mean, M2 = existingAggregate
+    count += 1
+    delta = newValue - mean
+    mean += delta / count
+    delta2 = newValue - mean
+    M2 += delta * delta2
+    return count, mean, M2
 
 
-def readListOfIntegersOrFloatsFromStdin():
-    while True:
-        try:
-            a = float(raw_input())
-            yield a
-        except:
-            break
+# Retrieve the mean, variance and sample variance from an aggregate
+def finalize(existingAggregate):
+    count, old_mean, M2 = existingAggregate
+    if count < 2:
+        return float("nan")
+    mean, variance = old_mean, M2 / count
+    return mean, variance
+
+
+def main():
+    if '-h' in sys.argv:
+        print("Usage:", sys.argv[0], '<digits>')
+        sys.exit(1)
+    digits = int(sys.argv[1]) if len(sys.argv) > 1 else 4
+    clr_to_eol = "\033[K\r"
+    state = (0, 0, 0)
+    for idx, line in enumerate(sys.stdin):
+        value = float(line)
+        state = update(state, value)
+        if idx > 1:
+            mean, variance = finalize(state)
+            print("Mean: %.*f  StdDev: %.*f" % (
+                digits, mean, digits, math.sqrt(variance)),
+                end=clr_to_eol, flush=True)
+
 
 if __name__ == "__main__":
-    printStatsOfList(readListOfIntegersOrFloatsFromStdin())
+    main()
