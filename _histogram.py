@@ -141,7 +141,7 @@ def histogram(stream, options):
         data = list(stream)
     else:
         data = stream
-    bucket_scale = 1
+    bucket_scale = 1.
 
     if options.min:
         min_v = Decimal(options.min)
@@ -238,7 +238,7 @@ def histogram(stream, options):
 
     # auto-pick the hash scale
     if max(bucket_counts) > 75:
-        bucket_scale = int(max(bucket_counts) / 75)
+        bucket_scale = max(bucket_counts) / 75.
 
     print(("Samples : " + g_yellow + "%d\n" + g_normal + "Range   : " + g_green + "%0.2f - %0.2f" + g_normal) %
           (samples, min_v, max_v))
@@ -260,7 +260,7 @@ def histogram(stream, options):
         bucket_count = bucket_counts[bucket]
         star_count = 0
         if bucket_count:
-            star_count = bucket_count // bucket_scale
+            star_count = int(bucket_count / bucket_scale)
         if options.percentage:
             pct = (100 * Decimal(bucket_count) / Decimal(samples))
             if star_count > 0:
