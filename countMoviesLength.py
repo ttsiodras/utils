@@ -15,8 +15,9 @@ def getMovieLength(filename):
         return filename, 0.
     cmd = "mplayer -nosound -quiet -identify -frames 0 -vo null "
     cmd += "\"%s\" 2>/dev/null | grep LENGTH" % filename
+    cmd = 'ffprobe -i "%s" -show_entries format=duration -v quiet -of csv="p=0"' % filename
     try:
-        return filename, float(os.popen(cmd).readlines()[0].split('=')[1])
+        return filename, float(os.popen(cmd).readlines()[0].strip())
     except:
         return filename, 0.
 
