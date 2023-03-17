@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 I've had it with syncing X and the clipboard.
 I was using autocutsel, but sometimes it doesn't work -
@@ -26,17 +26,17 @@ while True:
     debug = os.path.exists("/tmp/wtf")
     newState = getState()
     if debug:
-        print "newState:", newState
+        print("newState:", newState)
     if newState.xwin != state.xwin and newState.xwin != '':
-        print newState
-        print "Syncing X to clipboard"
+        print(newState)
+        print("Syncing X to clipboard")
         # The perl below strips the last newline
         os.system(
             getX + r"|perl -i -p0777we's/\n\z//'|" + setClip)
         state = getState()
     elif newState.clipboard != state.clipboard and newState.clipboard != '':
-        print newState
-        print "Syncing clipboard to X"
+        print(newState)
+        print("Syncing clipboard to X")
         # The perl below strips the last newline
         os.system(
             getClip + r"|perl -i -p0777we's/\n\z//'|" + setX)
