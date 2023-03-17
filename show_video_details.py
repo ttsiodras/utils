@@ -13,20 +13,21 @@ for fname in sorted(sys.argv[1:]):
         sys.exit(1)
 
     print("File:", fname)
-    jq = "jq '.streams[].duration' /dev/shm/data"
+    jq = "jq '.streams[].duration' /dev/shm/data | grep -v null"
     duration_in_sec = max(
         float(eval(x))
         for x in os.popen(jq).readlines())
     print("Duration:", duration_in_sec)
 
-    jq = "jq '.streams[] | select(.channels > 0) | .bit_rate' /dev/shm/data"
+    jq = "jq '.streams[] | select(.channels > 0) | .bit_rate' /dev/shm/data | grep -v null"
     audio_bitrates = [
         float(eval(x))
         for x in os.popen(jq).readlines()]
     print("Audio bitrates:", audio_bitrates)
+    if not audio_bitrates:
 
     for f in ['width', 'height', 'avg_frame_rate']:
-        jq = f"jq '.streams[].{f}' /dev/shm/data"
+        jq = f"jq '.streams[].{f}' /dev/shm/data | grep -v null"
         for x in os.popen(jq).readlines():
             try:
                 globals()[f] = max(globals().get(x, 0), float(eval(x)))
