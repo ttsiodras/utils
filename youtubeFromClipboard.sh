@@ -1,9 +1,14 @@
 #!/bin/bash
 LAST_URL=""
-SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.1.22|atomicpi|odysee.com|192.168.8.150'
+SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.4.|atomicpi|odysee.com|192.168.8.150|192.168.178'
 
 while true
 do
+    LINES="$(timeout 2 xclip -o 2>/dev/null | wc -l)" 
+    if [ $LINES -ne 0 ] ; then
+        sleep 1
+        continue
+    fi
     URL="$(timeout 2 xclip -o 2>/dev/null)" 
     if [ "$LAST_URL" == "$URL" ] ; then
         sleep 1 
@@ -30,7 +35,8 @@ do
         # i3-msg 'workspace 9; exec xterm -e mpv -fs "'"$URL"'"'
         # sleep 0.3
         # i3-msg "workspace ${WORKSPACE}"
-        sudo su - crap bash -c "mpv -fs \"$URL\""
+        sudo su - crap bash -c "firejail mpv -fs \"$URL\""
+        ## sudo su - crap bash -c "mpv --ytdl-format='best[ext=mp4][height=360]' -fs \"$URL\""
         continue
     }
     echo "$URL" | grep "^zathura: http" >/dev/null && {
