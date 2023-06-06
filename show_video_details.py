@@ -24,7 +24,6 @@ for fname in sorted(sys.argv[1:]):
         float(eval(x))
         for x in os.popen(jq).readlines()]
     print("Audio bitrates:", audio_bitrates)
-    if not audio_bitrates:
 
     for f in ['width', 'height', 'avg_frame_rate']:
         jq = f"jq '.streams[].{f}' /dev/shm/data | grep -v null"
