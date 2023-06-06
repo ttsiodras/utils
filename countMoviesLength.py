@@ -40,7 +40,6 @@ def main():
                 totalMinutes,
                 totalSeconds,
                 filename))
-    os.system("stty icanon echo")
 
 if __name__ == "__main__":
     main()
