@@ -22,11 +22,12 @@ where options are:
     -h, --help                     This help message
     -i, --input <inputVideoFile>   The file to read from
     -o, --output <outputVideoFile> The output .mkv file to create
+    -b, --bitsperpixel <bpp>       The desired bpp (defaults to 0.06)
 '''.format(prog=os.path.basename(sys.argv[0]))
     sys.exit(1)
 
 
-def computeRate(inputVideo):
+def computeRate(inputVideo, bpp):
     keys = [
         'ID_VIDEO_WIDTH',
         'ID_VIDEO_HEIGHT',
@@ -45,14 +46,14 @@ def computeRate(inputVideo):
     for key in keys:
         if key not in values.keys():
             panic("Failed to find %s for %s" % (key, inputVideo))
-    return int(0.06 * reduce(lambda x, y: x * y, values.values()) / 1000.0)
+    return int(bpp * reduce(lambda x, y: x * y, values.values()) / 1000.0)
 
 
 def main():
     try:
         args = sys.argv[1:]
         optlist, args = getopt.gnu_getopt(
-            args, "hi:o:", ['help', 'input', 'output'])
+            args, "hi:o:b:", ['help', 'input', 'output', 'bitsperpixel'])
     except:
         usage()
 
@@ -61,6 +62,7 @@ def main():
 
     inputVideo = None
     outputVideo = None
+    bpp = 0.06
     for opt, arg in optlist:
         if opt in ("-h", "--help"):
             usage()
@@ -68,6 +70,8 @@ def main():
             inputVideo = arg
         elif opt in ("-o", "--output"):
             outputVideo = arg
+        elif opt in ("-b", "--bitsperpixel"):
+            bpp = float(arg)
         else:
             usage()
 
@@ -76,7 +80,7 @@ def main():
 
     inputVideo = os.path.abspath(inputVideo).replace("'", "'\"'\"'")
     outputVideo = os.path.abspath(outputVideo).replace("'", "'\"'\"'")
-    outputRate = computeRate(inputVideo)
+    outputRate = computeRate(inputVideo, bpp)
     pid = str(os.getpid())
     os.system("rm -f x265*log* /tmp/fifo" + pid)
     os.system("mkfifo /tmp/fifo" + pid)
