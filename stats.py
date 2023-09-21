@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 If you are able to generate (or filter - grep, sed, awk, etc) a list
 of numbers in your stdout, then just pipe it to this utility, and
@@ -58,18 +58,18 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
     srted = sorted(allOfThem)
     if summaryOnly:
         s = g_green + ("%6.2f" % (total/n)) + " +/- " + "%6.2f%%" + g_normal
-        print s % ((100*math.sqrt(variance)*n/total) if total > 0 else 0.),
+        print(s % ((100*math.sqrt(variance)*n/total) if total > 0 else 0.), end=' ')
     else:
-        print "\n", g_yellow+label+g_normal, ":"
+        print("\n", g_yellow+label+g_normal, ":")
         samplesNo = len(allOfThem)
         measurements = [
             ("Average value", total/n),
             ("Std deviation", math.sqrt(varianceFull)),
             ("Sample stddev", math.sqrt(variance)),
             ("Median",
-                srted[samplesNo/2]
+                srted[samplesNo//2]
                 if samplesNo % 2
-                else 0.5*(srted[samplesNo/2 - 1] + srted[samplesNo/2])),
+                else 0.5*(srted[samplesNo//2 - 1] + srted[samplesNo//2])),
             ("Min", srted[0]),
             ("Max", srted[-1]),
             ("Samples", samplesNo),
@@ -77,17 +77,17 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
                 ((100*math.sqrt(variance)*n/total) if total > 0 else 0.))
         ]
         for label, value in measurements:
-            print "%*s:" % (15, label),
+            print("%*s:" % (15, label), end=' ')
             if isinstance(value, str):
-                print value
+                print(value)
             else:
-                print "%.9f" % value
+                print("%.9f" % value)
 
 
 def readListOfIntegersOrFloatsFromStdin():
     while True:
         try:
-            a = float(raw_input())
+            a = float(input())
             yield a
         except:
             break
