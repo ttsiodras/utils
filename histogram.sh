@@ -16,8 +16,11 @@ else
 fi
 
 # Display percentiles through Unix magic
-echo -e "\n[31mPercentiles:[0m"
 TOTAL_LINES=$(sort -n <${SCRATCHPAD} | tee "${SORTED}" | wc -l)
+if [ $TOTAL_LINES -eq 0 ] ; then 
+    exit
+fi
+echo -e "\n[31mPercentiles:[0m"
 for PCT in 97 95 90 75 50 25 ; do
 	echo -ne "\t${PCT}% = "
 	# (n + 99) / 100 with integers is effectively ceil(n/100) with floats
