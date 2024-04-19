@@ -1,0 +1,10 @@
+#!/bin/bash
+if [ $# -eq 0 ] ; then
+	echo "[-] Usage: hyperthread on|off"
+	exit 1
+fi
+if [ "$1" == "on" ] ; then
+	echo on | sudo tee /sys/devices/system/cpu/smt/control
+else
+	echo off | sudo tee /sys/devices/system/cpu/smt/control
+fi
