@@ -2,8 +2,21 @@
 LAST_URL=""
 SITES='youtube.com|framatube|vimeo.com|youtu.be|192.168.4.|atomicpi|odysee.com|192.168.8.150|192.168.178'
 
+# Uncomment this to enable battery checking
+# BATTERY_CHECK=1
+BATTERY_CHECK=120 # Hack to disable battery checks
+
 while true
 do
+    BATTERY_CHECK=$((BATTERY_CHECK + 1))
+    if [ $BATTERY_CHECK -eq 60 ] ; then
+        BATTERY_CHECK=1
+        BATTERY_LEVEL=$(acpi | awk -F '[ %]' '/^Battery/ {print $4}')
+        if [ "$BATTERY_LEVEL" -lt 30 -o "$BATTERY_LEVEL" -gt 82 ] ; then
+            mpv /opt/src/ttsiod/dev/perl/gong.wav.disabled
+            echo "[x] Battery longevity levels exceeded, do something"
+        fi
+    fi
     LINES="$(timeout 2 xclip -o 2>/dev/null | wc -l)" 
     if [ $LINES -ne 0 ] ; then
         sleep 1
@@ -55,6 +68,6 @@ do
             continue
         fi
     }
-    sleep 1 
+    sleep 1
     [ -f /tmp/stopyou ] && break
 done
