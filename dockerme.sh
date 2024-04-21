@@ -7,9 +7,10 @@
 # Launch with -n to have network - and with -r to be root.
 
 usage() {
-    echo -e "Usage: $0 [-h] [-r] [-n]"
+    echo -e "Usage: $0 [-h] [-r] [-n] [-p 9999]"
     echo -e "Where:"
     echo -e "\t-h\t\tshow this help"
+    echo -e "\t-p port\t\tExpose port"
     echo -e "\t-r\t\truns container with root user"
     echo -e "\t-n\t\truns container with network enabled"
     exit 1
@@ -24,8 +25,9 @@ xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
 
 ROOT="-u user"
 NETWORK="--network=none"
+PORT=""
 
-while getopts "hnr" o ; do
+while getopts "hnrp:" o ; do
     case "${o}" in 
         h)
             usage
@@ -35,6 +37,9 @@ while getopts "hnr" o ; do
             ;;
         r)
             ROOT="-u root"
+            ;;
+        p)
+            PORT="-p ${OPTARG}"
             ;;
         *)
             usage
@@ -55,4 +60,5 @@ exec docker run --rm $ROOT $NETWORK -it                      \
         -v ${XSOCK}:${XSOCK}                                 \
         -v ${XAUTH}:${XAUTH}                                 \
         -w /workdir                                          \
-        fasting
+        ${PORT}                                              \
+        fasting3
