@@ -25,15 +25,16 @@ Very useful if, like me, you benchmark short-lived runs a lot - e.g.
       done | stats.py
 
 Naturally, I benchmark my own stuff, not ls :-)
+
+Command-line option '-c' forces colored output, even if output is a pipe.
 '''
 import math
-
-from sys import stdout
+import sys
 
 # Colored message ANSI constants
-g_green = chr(27) + "[32m" if stdout.isatty() else ""
-g_yellow = chr(27) + "[33m" if stdout.isatty() else ""
-g_normal = chr(27) + "[0m" if stdout.isatty() else ""
+g_green = chr(27) + "[32m" if sys.stdout.isatty() or "-c" in sys.argv else ""
+g_yellow = chr(27) + "[33m" if sys.stdout.isatty() or "-c" in sys.argv else ""
+g_normal = chr(27) + "[0m" if sys.stdout.isatty() or "-c" in sys.argv else ""
 
 
 def printStatsOfList(results, label='Statistics', summaryOnly=False):
