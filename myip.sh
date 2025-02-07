@@ -1,1 +1,1 @@
-wget -q -O - checkip.amazonaws.com
+wget -q -O - https://checkip.amazonaws.com
