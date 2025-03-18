@@ -27,8 +27,8 @@ do
     if [ ! -z "$files" ]; then
         echo -e "\nChanged:" $files
         echo -e "Executing $command ..."
-        bash -c "$command"
         touch $sentinel
+        bash -c "$command"
     fi
     sleep 0.1
 done
