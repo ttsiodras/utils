@@ -34,7 +34,7 @@ do
         CMD="$CMD perc:$PCT 1"
 done
 echo
-$CMD < ${SCRATCHPAD} | sed 's,\.00*\t,\t,g'
+$CMD < ${SCRATCHPAD} | sed -E 's/(\.[0-9]*[1-9])0+([[:space:]]|$)/\1\2/g;s/\.0+([[:space:]]|$)/\1/g;'
 ) | column -t
 # 	# (n + 99) / 100 with integers is effectively ceil(n/100) with floats
 # 	COUNT=$(((TOTAL_LINES * PCT + 99) / 100))
