@@ -6,5 +6,4 @@
 gdb -q -p "$1" -batch \
     -ex "thread apply all bt" \
     -ex "detach" \
-    -ex "quit" \
-    &> backtrace.log
+    -ex "quit"
