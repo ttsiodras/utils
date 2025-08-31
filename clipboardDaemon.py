@@ -42,3 +42,6 @@ while True:
             getClip + r"|perl -i -p0777we's/\n\z//'|" + setX)
         state = getState()
     time.sleep(0.25)
+    capacity = int(open("/sys/class/power_supply/BAT1/capacity").read())
+    if capacity < 30:
+        os.system('notify-send "Low battery" "Less than 30% left... Plug me in"')
