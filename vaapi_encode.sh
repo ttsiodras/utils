@@ -10,4 +10,5 @@ TARGET="/dev/shm/$BASE.HEVC.mp4"
 #
 # ...this fallback is the one that works.
 # It is much, much worse quality-wise...  but still, acceptable in my tests with my phone's recordings.
+# ffmpeg -extra_hw_frames 64 -hwaccel vaapi -vaapi_device /dev/dri/renderD128 -hwaccel_output_format vaapi -i "$1" -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 28 "$TARGET"
 ffmpeg -extra_hw_frames 64 -hwaccel vaapi -vaapi_device /dev/dri/renderD128 -hwaccel_output_format vaapi -i "$1"  -c:v hevc_vaapi -qp 28 "$TARGET"
