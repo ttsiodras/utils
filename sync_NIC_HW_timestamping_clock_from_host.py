@@ -12,6 +12,23 @@ get proper timestamps in both TX/RX directions:
     --nano --immediate-mode            \
       'not port 5201'
 
+Potential systemd service:
+
+    # /etc/systemd/system/phc2sys@.service
+    [Unit]
+    Description=phc2sys: sync %I to /dev/ptp6
+    After=network-online.target
+    Wants=network-online.target
+    
+    [Service]
+    Type=simple
+    ExecStart=/usr/sbin/phc2sys -m -s CLOCK_REALTIME -c /dev/ptp6 -O 0
+    Restart=always
+    RestartSec=2
+    
+    [Install]
+    WantedBy=multi-user.target
+
 """
 import os
 import sys
