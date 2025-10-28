@@ -51,7 +51,7 @@ def main():
     if not os.path.exists(clock):
         print(f'[x] Failed to find {clock}')
         sys.exit(1)
-    cmd = "sudo phc2sys -s CLOCK_REALTIME -c /dev/ptp6 -O 0 -m"
+    cmd = f"sudo phc2sys -s CLOCK_REALTIME -c {clock} -O 0 -m"
     print(f"[-] Launching: {cmd}")
     os.system(cmd)
 
