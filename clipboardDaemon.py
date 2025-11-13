@@ -28,20 +28,23 @@ while True:
     if debug:
         print("newState:", newState)
     if newState.xwin != state.xwin and newState.xwin != '':
-        print(newState)
+        # print(newState)
         print("Syncing X to clipboard")
         # The perl below strips the last newline
         os.system(
             getX + r"|perl -i -p0777we's/\n\z//'|" + setClip)
         state = getState()
     elif newState.clipboard != state.clipboard and newState.clipboard != '':
-        print(newState)
+        # print(newState)
         print("Syncing clipboard to X")
         # The perl below strips the last newline
         os.system(
             getClip + r"|perl -i -p0777we's/\n\z//'|" + setX)
         state = getState()
     time.sleep(0.25)
-    capacity = int(open("/sys/class/power_supply/BAT1/capacity").read())
-    if capacity < 30:
-        os.system('notify-send "Low battery" "Less than 30% left... Plug me in"')
+    try:
+        capacity = int(open("/sys/class/power_supply/BAT1/capacity").read())
+        if capacity < 30:
+            os.system('notify-send "Low battery" "Less than 30% left... Plug me in"')
+    except:
+        pass
