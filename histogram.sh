@@ -18,6 +18,7 @@ while [[ "$1" =~ ^- ]]; do
             ;;
         -r)
             NO_OUTLIERS=1
+            echo "Ignoring outliers..." >&2
             shift
             ;;
         --) # stop parsing flags
@@ -31,14 +32,14 @@ while [[ "$1" =~ ^- ]]; do
     esac
 done
 
-if [[ $NO_HISTO -eq 1 ]]; then
-    cat "$@" > "${SCRATCHPAD}"
+if [[ $NO_OUTLIERS -eq 1 ]]; then
+    cat "$@" | histogram.py -o - - > "${SCRATCHPAD}"
 else
-    if [[ $NO_OUTLIERS -eq 1 ]]; then
-        cat "$@" | tee "${SCRATCHPAD}" | histogram.py -o - - | _histogram.py
-    else
-        cat "$@" | tee "${SCRATCHPAD}" | _histogram.py
-    fi
+    cat "$@" > "${SCRATCHPAD}"
+fi
+
+if [[ $NO_HISTO -ne 1 ]]; then
+    cat "${SCRATCHPAD}" | _histogram.py
 fi
 
 echo
