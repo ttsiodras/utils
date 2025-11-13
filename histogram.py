@@ -57,6 +57,7 @@ def main():
     parser.add_argument('-w', '--width', help='Width of the generated plot', default='640')
     parser.add_argument('-t', '--height', help='Height of the generated plot', default='480')
     parser.add_argument('-p', '--png', help='Filename to store generated histogram as PNG image')
+    parser.add_argument('-o', '--output', help='just filter out the outliers')
 
     args = parser.parse_args()
     # print(args.filename, args.buckets, args.outliersOff)
@@ -72,9 +73,12 @@ def main():
         f = open(args.filename)
 
     x = np.array([float(x) for x in f.readlines()])
-    if args.outliersOff:
+    if args.outliersOff or args.output:
         x = x[~is_outlier(x)]
-
+    if args.output:
+        for d in x:
+            print(d)
+        sys.exit(0)
 
     # fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
     fig, axs = plt.subplots(1)

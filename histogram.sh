@@ -7,36 +7,52 @@ function cleanup() {
 }
 trap cleanup EXIT
 
-# Display nice histogram through Python, unless -n passed
-if [ "$1" != "-n" ] ; then
-    cat "$@" | tee ${SCRATCHPAD} | _histogram.py
-else
-    shift
-    cat "$@" > ${SCRATCHPAD}
-fi
+NO_HISTO=0
+NO_OUTLIERS=0
 
-# # Display percentiles through Unix magic
-# TOTAL_LINES=$(sort -n <${SCRATCHPAD} | tee "${SORTED}" | wc -l)
-# if [ $TOTAL_LINES -eq 0 ] ; then 
-#     exit
-# fi
+while [[ "$1" =~ ^- ]]; do
+    case "$1" in
+        -n)
+            NO_HISTO=1
+            shift
+            ;;
+        -r)
+            NO_OUTLIERS=1
+            shift
+            ;;
+        --) # stop parsing flags
+            shift
+            break
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ $NO_HISTO -eq 1 ]]; then
+    cat "$@" > "${SCRATCHPAD}"
+else
+    if [[ $NO_OUTLIERS -eq 1 ]]; then
+        cat "$@" | tee "${SCRATCHPAD}" | histogram.py -o - - | _histogram.py
+    else
+        cat "$@" | tee "${SCRATCHPAD}" | _histogram.py
+    fi
+fi
 
 echo
 
 (
-echo -en "MIN\tMED\tAVG\tMAX\t"
-PCTS="25 50 75 90 99 99.9 99.99 99.999"
-CMD="datamash --format=%10.5f min 1 median 1 mean 1 max 1"
+    echo -en "MIN\tMED\tAVG\tMAX\t"
+    PCTS="25 50 75 90 99 99.9 99.99 99.999"
+    CMD="datamash --format=%10.5f min 1 median 1 mean 1 max 1"
 
-for PCT in $PCTS
-do
-	echo -en "${PCT}%\t"
+    for PCT in $PCTS
+    do
+        echo -en "${PCT}%\t"
         CMD="$CMD perc:$PCT 1"
-done
-echo
-$CMD < ${SCRATCHPAD} | sed -E 's/(\.[0-9]*[1-9])0+([[:space:]]|$)/\1\2/g;s/\.0+([[:space:]]|$)/\1/g;'
+    done
+    echo
+    $CMD < ${SCRATCHPAD} | sed -E 's/(\.[0-9]*[1-9])0+([[:space:]]|$)/\1\2/g;s/\.0+([[:space:]]|$)/\1/g;'
 ) | column -t
-# 	# (n + 99) / 100 with integers is effectively ceil(n/100) with floats
-# 	COUNT=$(((TOTAL_LINES * PCT + 99) / 100))
-# 	head -n $COUNT "${SORTED}" | tail -n 1
-# done
