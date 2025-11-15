@@ -48,8 +48,7 @@ do
         # i3-msg 'workspace 9; exec xterm -e mpv -fs "'"$URL"'"'
         # sleep 0.3
         # i3-msg "workspace ${WORKSPACE}"
-        sudo su - crap bash -c "firejail --private-etc=resolv.conf,ssl,ca-certificates,fonts,pulse mpv -fs \"$URL\""
-        ## sudo su - crap bash -c "mpv --ytdl-format='best[ext=mp4][height=360]' -fs \"$URL\""
+        mpv -fs "$URL"
         continue
     }
     echo "$URL" | grep "^zathura: http" >/dev/null && {
