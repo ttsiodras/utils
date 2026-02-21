@@ -1,6 +1,7 @@
 # From https://news.ycombinator.com/item?id=45898407
 FROM python:3-slim
 RUN python3 -m pip --no-cache-dir install 'yt-dlp[default]'
+RUN yt-dlp -U
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -q -y ffmpeg curl unzip \
  && curl -fsSL https://deno.land/install.sh -o /tmp/deno.sh \

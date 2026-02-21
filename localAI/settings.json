@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://172.17.0.1:8000",
+    "ANTHROPIC_API_KEY": "dummy",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "openai/gpt-oss-120b",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "openai/gpt-oss-120b",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "openai/gpt-oss-120b",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}
