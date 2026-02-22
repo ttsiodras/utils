@@ -1,19 +1,18 @@
 import asyncio
+import sys
+import logging
 import time
 import statistics
 import argparse
 import json
-import os
+
 from openai import AsyncOpenAI
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 # ---- CONFIG ----
 BASE_URL = "http://172.17.0.1:8000/v1"
 API_KEY = "EMPTY"  # vLLM doesn't require a real key
-MODEL_OPTIONS = {
-    "qwen3": "unsloth_Qwen3-Next-80B-A3B-Instruct-GGUF_Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf",
-    "gpt-oss": "bartowski_openai_gpt-oss-120b-GGUF_openai_gpt-oss-120b-Q6_K_openai_gpt-oss-120b-Q6_K-00001-of-00002.gguf"
-}
-DEFAULT_MODEL = "qwen3"
 
 DEFAULT_CONCURRENCY = 1
 DEFAULT_REQUESTS_PER_WORKER = 4
@@ -27,19 +26,20 @@ client = AsyncOpenAI(
     base_url=BASE_URL,
 )
 
-async def validate_model(model_name):
-    """Validate that the specified model is available on the server."""
+async def get_default_model():
+    """Return the first model ID reported by the vLLM server.
+    If the server returns no models, abort with a clear error message."""
     try:
         models = await client.models.list()
-        model_ids = [m.id for m in models.data]
-        if model_name not in model_ids:
-            print(f"Error: Model '{model_name}' not found in available models: {model_ids}")
-            exit(1)
-        else:
-            print(f"Model '{model_name}' is available.")
+        if not models.data:
+            logging.error("No models available on the vLLM server.")
+            sys.exit(1)
+        first_model = models.data[0].id
+        logging.info(f"Selected default model '{first_model}' from server list.")
+        return first_model
     except Exception as e:
-        print(f"Failed to retrieve model list: {e}")
-        exit(1)
+        logging.error(f"Failed to retrieve model list: {e}")
+        sys.exit(1)
 
 async def single_request(model, max_tokens):
     """Execute a single request and return performance metrics."""
@@ -81,7 +81,7 @@ async def single_request(model, max_tokens):
         "error": error,
     }
 
-async def worker(concurrency, requests_per_worker, max_tokens, model):
+async def worker(requests_per_worker, max_tokens, model):
     """Execute multiple requests in sequence and return results."""
     results = []
     for _ in range(requests_per_worker):
@@ -96,24 +96,19 @@ async def main():
     parser.add_argument('--max-tokens', type=int, default=DEFAULT_MAX_TOKENS, help='Maximum tokens to generate')
     parser.add_argument('--output', type=str, help='Output file for results (JSON)')
     parser.add_argument('--warmup', type=int, default=1, help='Number of warmup requests')
-    parser.add_argument('--model', type=str, default=DEFAULT_MODEL, choices=list(MODEL_OPTIONS.keys()),
-                       help=f'Select model to benchmark. Available options: {list(MODEL_OPTIONS.keys())}')
     args = parser.parse_args()
 
-    # Get model from options
-    model = MODEL_OPTIONS[args.model]
-
-    # Validate model
-    await validate_model(model)
+        # Automatically select the first available model from the server
+    model = await get_default_model()
 
     # Run warmup requests
     if args.warmup > 0:
-        print(f"Running {args.warmup} warmup request(s)...")
+        logging.info(f"Running {args.warmup} warmup request(s)...")
         warmup_tasks = [single_request(model, args.max_tokens) for _ in range(args.warmup)]
         await asyncio.gather(*warmup_tasks)
 
-    print(f"Running benchmark with concurrency={args.concurrency}, requests per worker={args.requests}, model={model}")
-    tasks = [worker(args.concurrency, args.requests, args.max_tokens, model) for _ in range(args.concurrency)]
+    logging.info(f"Running benchmark with concurrency={args.concurrency}, requests per worker={args.requests}, model={model}")
+    tasks = [worker(args.requests, args.max_tokens, model) for _ in range(args.concurrency)]
     all_results = await asyncio.gather(*tasks)
 
     flat = [r for worker in all_results for r in worker]
@@ -142,7 +137,6 @@ async def main():
                     "requests_per_worker": args.requests,
                     "max_tokens": args.max_tokens,
                     "model": model,
-                    "model_choice": args.model,
                     "prompt": PROMPT,
                     "warmup": args.warmup
                 },
