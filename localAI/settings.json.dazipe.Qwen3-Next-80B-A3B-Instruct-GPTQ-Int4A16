@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://172.17.0.1:8000",
+    "ANTHROPIC_API_KEY": "dummy",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

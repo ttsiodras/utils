@@ -11,10 +11,6 @@ else
     echo "OK: $TARGET is NOT accessible. Proceeding..."
 fi
 
-SNAP=b5c939de8f754692c1647ca79fbf85e8c1e70f8a
-BASE="$HOME/.cache/huggingface/hub/models--openai--gpt-oss-120b"
-MODEL_PATH="$BASE/snapshots/$SNAP"
-
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=52335  # or any free port
 export NCCL_SOCKET_IFNAME=lo
@@ -34,17 +30,18 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 
-#vllm serve "$MODEL_PATH" \
-
-vllm serve "openai/gpt-oss-120b" \
+vllm serve "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16" \
+  --host 0.0.0.0 \
   --port 8000 \
   --tensor-parallel-size 1 \
-  --max-model-len 131072 \
+  --max-num-seqs 1 \
+  --max-model-len 262144 \
   --gpu-memory-utilization 0.95 \
   --dtype auto \
-  --tokenizer openai/gpt-oss-120b \
-  --max-num-seqs 8
-  # --enable-auto-tool-choice
+  --trust-remote-code \
+  --enforce-eager \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes
 
 # .venv/bin/vllm serve "$MODEL_PATH" \
 #   -tp 8 \

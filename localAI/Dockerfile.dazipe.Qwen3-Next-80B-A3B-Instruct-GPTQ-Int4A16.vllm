@@ -17,6 +17,6 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 RUN mkdir -p .claude
 WORKDIR /home/${USERNAME}/.claude
-COPY settings.json.gpt-oss-120b settings.json
+COPY settings.json.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16 settings.json
 WORKDIR /home/${USERNAME}
 COPY claude.json .claude.json
