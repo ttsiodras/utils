@@ -6,7 +6,6 @@ all:
 	  --build-arg USERNAME=$$(whoami) \
 	  --build-arg SETTINGS_SRC=settings.json.gpt-oss-120b \
 	  -t claude-gpt-oss-120b -f Dockerfile.base.vllm .
-
 	# Build the Qwen3‑Next‑80B‑A3B image
 	docker build \
 	  --build-arg UID=$$(id -u) \
