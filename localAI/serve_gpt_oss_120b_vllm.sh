@@ -43,7 +43,8 @@ vllm serve "openai/gpt-oss-120b" \
   --gpu-memory-utilization 0.95 \
   --dtype auto \
   --tokenizer openai/gpt-oss-120b \
-  --max-num-seqs 8
+  --max-num-seqs 8  # just in case I decide to use subagents :-)
+
   # --enable-auto-tool-choice
 
 # .venv/bin/vllm serve "$MODEL_PATH" \
