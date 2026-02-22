@@ -1,4 +1,4 @@
-FROM debian:bookworm
+FROM debian:12-slim
 
 # Build‑time arguments
 ARG USERNAME
@@ -14,7 +14,8 @@ RUN apt update && \
             --gid ${GID} \
             --create-home \
             --shell /bin/bash \
-            ${USERNAME}
+            ${USERNAME} && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Claude‑Code globally
 RUN npm install -g @anthropic-ai/claude-code
