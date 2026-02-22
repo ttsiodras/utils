@@ -1,22 +1,2 @@
-FROM debian:bookworm
-ARG USERNAME
-ARG UID
-ARG GID
-RUN apt update
-RUN apt install -y nodejs npm
-RUN getent group | grep :${GID}: >/dev/null || groupadd --gid ${GID} ${USERNAME}
-RUN useradd \
-        --uid ${UID} \
-        --gid ${GID} \
-        --create-home \
-        --shell /bin/bash \
-        ${USERNAME}
-RUN npm install -g @anthropic-ai/claude-code
-RUN apt install -y tmux net-tools busybox
-USER ${USERNAME}
-WORKDIR /home/${USERNAME}
-RUN mkdir -p .claude
-WORKDIR /home/${USERNAME}/.claude
-COPY settings.json.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16 settings.json
-WORKDIR /home/${USERNAME}
-COPY claude.json .claude.json
+FROM dockerfile.base.vllm
+ARG SETTINGS_SRC=settings.json.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16

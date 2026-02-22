@@ -1,0 +1,40 @@
+FROM debian:bookworm
+
+# Build‑time arguments
+ARG USERNAME
+ARG UID
+ARG GID
+ARG SETTINGS_SRC   # path to the model‑specific settings JSON
+
+# System setup
+RUN apt update && \
+    apt install -y nodejs npm busybox && \
+    getent group | grep :${GID}: >/dev/null || groupadd --gid ${GID} ${USERNAME} && \
+    useradd --uid ${UID} \
+            --gid ${GID} \
+            --create-home \
+            --shell /bin/bash \
+            ${USERNAME}
+
+# Install Claude‑Code globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Switch to non‑root user
+USER ${USERNAME}
+ENV COLORTERM=truecolor
+ENV TERM=xterm-256color
+WORKDIR /home/${USERNAME}
+
+# Create Claude data directory
+RUN mkdir -p .claude
+WORKDIR /home/${USERNAME}/.claude
+
+# Copy model‑specific settings
+COPY ${SETTINGS_SRC} settings.json
+
+# Copy generic Claude config
+WORKDIR /home/${USERNAME}
+COPY claude.json .claude.json
+
+# Launch Claude‑Code when container starts
+CMD ["/usr/local/bin/claude"]
