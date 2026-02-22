@@ -1,2 +1,2 @@
-FROM dockerfile.base.vllm
+FROM Dockerfile.base.vllm
 ARG SETTINGS_SRC=settings.json.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16

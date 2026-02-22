@@ -1,2 +1,2 @@
-FROM dockerfile.base.vllm
+FROM Dockerfile.base.vllm
 ARG SETTINGS_SRC=settings.json.gpt-oss-120b
