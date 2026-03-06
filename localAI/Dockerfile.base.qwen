@@ -1,0 +1,44 @@
+FROM debian:12-slim
+
+# Build‑time arguments
+ARG USERNAME
+ARG UID
+ARG GID
+
+# System setup
+RUN apt update && \
+    apt install -y nodejs npm busybox python3-dev python3-venv gcc g++ make bear sqlite3 && \
+    getent group | grep :${GID}: >/dev/null || groupadd --gid ${GID} ${USERNAME} && \
+    useradd --uid ${UID} \
+            --gid ${GID} \
+            --create-home \
+            --shell /bin/bash \
+            ${USERNAME} && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Claude‑Code globally
+RUN npm install -g @qwen-code/qwen-code@latest
+
+# Switch to non-root user
+USER ${USERNAME}
+ENV COLORTERM=truecolor
+ENV TERM=xterm-256color
+WORKDIR /home/${USERNAME}
+
+# Create Claude data directory
+RUN mkdir -p .qwen
+WORKDIR /home/${USERNAME}/.qwen
+
+# Copy model-specific settings
+COPY --chown=${USERNAME}:users settings.json.qwencode settings.json
+
+WORKDIR /home/${USERNAME}
+
+# Create virtual environment + install tools
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --upgrade pip && \
+    .venv/bin/pip install pylint flake8 mypy
+
+ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
+
+CMD ["/usr/local/bin/qwen", "--approval-mode", "yolo"]

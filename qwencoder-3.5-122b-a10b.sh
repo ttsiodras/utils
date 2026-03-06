@@ -1,0 +1,1 @@
+localAI/qwencoder-3.5-122b-a10b.sh

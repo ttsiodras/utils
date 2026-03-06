@@ -17,3 +17,11 @@ all:
 	  -t claude-qwen3-next-80b-a3b-instruct-gptq-int4a16 \
 	  -f Dockerfile.base.vllm \
 	  .
+	# Build the Qwen3.5-122B-A10B
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t qwen3.5-122b-a10b \
+	  -f Dockerfile.base.qwen \
+	  .

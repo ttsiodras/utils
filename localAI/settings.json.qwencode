@@ -1,0 +1,7 @@
+{
+  "env": {
+    "OPENAI_API_KEY": "dummy",
+    "OPENAI_BASE_URL": "http://172.17.0.1:8000",
+    "OPENAI_MODEL": "unsloth_Qwen3.5-122B-A10B-GGUF_UD-Q4_K_XL_Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf"
+  }
+}
