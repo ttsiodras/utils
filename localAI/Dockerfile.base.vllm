@@ -44,4 +44,4 @@ RUN python3 -m venv .venv && \
 
 ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
 
-CMD ["/usr/local/bin/claude"]
+CMD ["/usr/local/bin/claude", "--dangerously-skip-permissions"]

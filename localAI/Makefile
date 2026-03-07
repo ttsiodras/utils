@@ -1,5 +1,5 @@
 all:
-	# Build the GPT-OSS-120b image
+	# Build the GPT-OSS-120b claude code image
 	docker build \
 	  --build-arg UID=$$(id -u) \
 	  --build-arg GID=$$(id -g) \
@@ -7,6 +7,14 @@ all:
 	  --build-arg SETTINGS_SRC=settings.json.gpt-oss-120b \
 	  -t claude-gpt-oss-120b \
 	  -f Dockerfile.base.vllm \
+	  .
+	# Build the GPT-OSS-120b codex image
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t codex-gpt-oss-120b \
+	  -f Dockerfile.base.codex \
 	  .
 	# Build the Qwen3-Next-80B-A3B image
 	docker build \
