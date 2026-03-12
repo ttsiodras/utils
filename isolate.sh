@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+#
+# Uses firejail to network-isolate applications.
+#
+# If your kernel supports unprivileged user namespaces (default for most kernels as of 2026),
+# then this will allow simple (non-root) users to completely isolate their app.
+#
+# It also allows selective servers to pass through; but for that to work, firejail config
+# at /etc/firejail/firejail.config must change the default for restricted-network to: no
+#
+#    $ grep -v ^# /etc/firejail/firejail.config
+#    restricted-network no
+#
+# Since firejail will keep the namespace open until all binaries inside die, the script
+# runs your app from a "superscript"; that kills everything in the process namespace after
+# your app dies.
+#
+set -Eeuo pipefail
+
+usage() {
+    cat >&2 <<'EOF'
+Usage:
+  isolate.sh [--servers FILE] [--iface IFACE] [--dns IP[,IP...]] [--] app [args...]
+
+Examples:
+  isolate.sh vim src/renderer.cc
+  isolate.sh --servers list_of_servers.txt -- vim src/renderer.cc
+  isolate.sh --servers=list_of_servers.txt --dns=1.1.1.1,9.9.9.9 -- curl https://example.com/
+
+Behavior:
+  - Without --servers:
+      run app with localhost only
+  - With --servers:
+      allow loopback plus only the listed remote IPs/CIDRs/hostnames
+      optionally restricted by port
+
+Servers file format:
+  One entry per line. Blank lines and # comments are ignored.
+
+  Accepted forms:
+    203.0.113.10
+    203.0.113.10:443
+    203.0.113.0/24
+    203.0.113.0/24:443
+    2001:db8::10
+    2001:db8:abcd::/48
+    [2001:db8::10]:443
+    example.com
+    example.com:443
+
+Notes:
+  - Hostnames are resolved before entering the sandbox.
+  - Port is optional. If omitted, all ports to that destination are allowed.
+  - If the app itself needs DNS at runtime, pass resolver IPs with --dns.
+EOF
+    exit 2
+}
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+detect_default_iface() {
+    local iface
+    iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+    [[ -n "${iface:-}" ]] || die "could not detect default network interface; pass --iface"
+    printf '%s\n' "$iface"
+}
+
+is_ipv4_cidr() {
+    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]
+}
+
+is_ipv6_like() {
+    [[ "$1" == *:* ]]
+}
+
+append_v4_rule() {
+    local addr="$1" port="${2:-}"
+    if [[ -n "$port" ]]; then
+        printf -- "-A OUTPUT -p tcp -d %s --dport %s -j ACCEPT\n" "$addr" "$port" >> "$NFT4"
+        printf -- "-A OUTPUT -p udp -d %s --dport %s -j ACCEPT\n" "$addr" "$port" >> "$NFT4"
+    else
+        printf -- "-A OUTPUT -d %s -j ACCEPT\n" "$addr" >> "$NFT4"
+    fi
+}
+
+append_v6_rule() {
+    local addr="$1" port="${2:-}"
+    if [[ -n "$port" ]]; then
+        printf -- "-A OUTPUT -p tcp -d %s --dport %s -j ACCEPT\n" "$addr" "$port" >> "$NFT6"
+        printf -- "-A OUTPUT -p udp -d %s --dport %s -j ACCEPT\n" "$addr" "$port" >> "$NFT6"
+    else
+        printf -- "-A OUTPUT -d %s -j ACCEPT\n" "$addr" >> "$NFT6"
+    fi
+}
+
+resolve_hostname() {
+    local host="$1"
+    local out
+    local -a addrs=()
+
+    if out="$(getent ahostsv4 "$host" 2>/dev/null)"; then
+        while read -r ip _; do
+            [[ -n "${ip:-}" ]] || continue
+            addrs+=("$ip")
+        done <<< "$out"
+    fi
+
+    if out="$(getent ahostsv6 "$host" 2>/dev/null)"; then
+        while read -r ip _; do
+            [[ -n "${ip:-}" ]] || continue
+            addrs+=("$ip")
+        done <<< "$out"
+    fi
+
+    if [[ ${#addrs[@]} -eq 0 ]]; then
+        die "failed to resolve hostname: $host"
+    fi
+
+    printf '%s\n' "${addrs[@]}" | awk '!seen[$0]++'
+}
+
+add_destination() {
+    local addr="$1" port="${2:-}"
+    if is_ipv4_cidr "$addr"; then
+        append_v4_rule "$addr" "$port"
+    elif is_ipv6_like "$addr"; then
+        append_v6_rule "$addr" "$port"
+    else
+        die "unsupported address format: '$addr'"
+    fi
+}
+
+parse_server_line() {
+    local line="$1"
+    local target=""
+    local port=""
+    local resolved
+
+    if [[ "$line" =~ ^\[([0-9A-Fa-f:]+)\]:([0-9]{1,5})$ ]]; then
+        target="${BASH_REMATCH[1]}"
+        port="${BASH_REMATCH[2]}"
+    elif [[ "$line" =~ ^(([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?)(:([0-9]{1,5}))?$ ]]; then
+        target="${BASH_REMATCH[1]}"
+        port="${BASH_REMATCH[6]:-}"
+    elif [[ "$line" =~ ^([A-Za-z0-9._-]+):([0-9]{1,5})$ ]]; then
+        target="${BASH_REMATCH[1]}"
+        port="${BASH_REMATCH[2]}"
+    else
+        target="$line"
+        port=""
+    fi
+
+    if [[ -n "$port" ]]; then
+        [[ "$port" =~ ^[0-9]{1,5}$ ]] || die "invalid port in entry: '$line'"
+        (( port >= 1 && port <= 65535 )) || die "port out of range in entry: '$line'"
+    fi
+
+    if is_ipv4_cidr "$target" || is_ipv6_like "$target"; then
+        add_destination "$target" "$port"
+        return
+    fi
+
+    while IFS= read -r resolved; do
+        [[ -n "$resolved" ]] || continue
+        add_destination "$resolved" "$port"
+    done < <(resolve_hostname "$target")
+}
+
+SERVERS_FILE=""
+IFACE=""
+DNS_CSV=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --servers)
+            [[ $# -ge 2 ]] || usage
+            SERVERS_FILE="$2"
+            shift 2
+            ;;
+        --servers=*)
+            SERVERS_FILE="${1#*=}"
+            shift
+            ;;
+        --iface)
+            [[ $# -ge 2 ]] || usage
+            IFACE="$2"
+            shift 2
+            ;;
+        --iface=*)
+            IFACE="${1#*=}"
+            shift
+            ;;
+        --dns)
+            [[ $# -ge 2 ]] || usage
+            DNS_CSV="$2"
+            shift 2
+            ;;
+        --dns=*)
+            DNS_CSV="${1#*=}"
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            die "unknown option: $1"
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+[[ $# -ge 1 ]] || usage
+
+have_cmd firejail || die "firejail not found"
+have_cmd ip || die "'ip' command not found"
+have_cmd bash || die "bash not found"
+have_cmd getent || die "'getent' not found"
+
+APP=( "$@" )
+
+INNER_SCRIPT='
+set +e
+"$@"
+rc=$?
+
+for round in TERM KILL; do
+    for proc in /proc/[0-9]*; do
+        pid=${proc#/proc/}
+        pid=${pid%%/*}
+        case "$pid" in
+            ""|1|'$$'|'$PPID') continue ;;
+        esac
+        kill -s "$round" "$pid" 2>/dev/null || true
+    done
+    [ "$round" = TERM ] && sleep 0.2
+done
+
+exit "$rc"
+'
+
+run_firejail() {
+    exec firejail "$@" -- bash -c "$INNER_SCRIPT" isolate-inner "${APP[@]}"
+}
+
+if [[ -z "$SERVERS_FILE" ]]; then
+    run_firejail --quiet --noprofile --net=none
+fi
+
+[[ -r "$SERVERS_FILE" ]] || die "cannot read servers file: $SERVERS_FILE"
+
+if [[ -z "$IFACE" ]]; then
+    IFACE="$(detect_default_iface)"
+fi
+
+TMPDIR_PARENT="${XDG_RUNTIME_DIR:-/tmp}"
+WORKDIR="$(mktemp -d "$TMPDIR_PARENT/isolate-firejail.XXXXXX")"
+NFT4="$WORKDIR/allowlist.net"
+NFT6="$WORKDIR/allowlist6.net"
+
+cleanup() {
+    rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
+
+cat > "$NFT4" <<'EOF'
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+-A INPUT -i lo -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+EOF
+
+cat > "$NFT6" <<'EOF'
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+-A INPUT -i lo -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+EOF
+
+if [[ -n "$DNS_CSV" ]]; then
+    IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
+    for dns in "${DNS_ARR[@]}"; do
+        dns="$(trim "$dns")"
+        [[ -n "$dns" ]] || continue
+        if is_ipv4_cidr "$dns"; then
+            printf -- "-A OUTPUT -p udp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT4"
+            printf -- "-A OUTPUT -p tcp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT4"
+        elif is_ipv6_like "$dns"; then
+            printf -- "-A OUTPUT -p udp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT6"
+            printf -- "-A OUTPUT -p tcp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT6"
+        else
+            die "invalid DNS IP: $dns"
+        fi
+    done
+fi
+
+while IFS= read -r raw || [[ -n "$raw" ]]; do
+    line="${raw%%#*}"
+    line="$(trim "$line")"
+    [[ -n "$line" ]] || continue
+    parse_server_line "$line"
+done < "$SERVERS_FILE"
+
+printf 'COMMIT\n' >> "$NFT4"
+printf 'COMMIT\n' >> "$NFT6"
+
+FJ_ARGS=(
+    --quiet
+    --noprofile
+)
+
+if [[ -n "$DNS_CSV" ]]; then
+    IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
+    for dns in "${DNS_ARR[@]}"; do
+        dns="$(trim "$dns")"
+        [[ -n "$dns" ]] || continue
+        FJ_ARGS+=(--dns="$dns")
+    done
+fi
+
+FJ_ARGS+=(
+    --net="$IFACE"
+    --netfilter="$NFT4"
+    --netfilter6="$NFT6"
+)
+
+run_firejail "${FJ_ARGS[@]}"
