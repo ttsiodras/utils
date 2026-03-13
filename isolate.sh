@@ -233,7 +233,6 @@ done
 
 have_cmd firejail || die "firejail not found"
 have_cmd ip || die "'ip' command not found"
-have_cmd bash || die "bash not found"
 have_cmd getent || die "'getent' not found"
 
 APP=( "$@" )
