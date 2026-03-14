@@ -107,6 +107,8 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
     for dirpath, _, filenames in os.walk(top_folder, followlinks=False):
         for filename in filenames:
             full_path_abs = os.path.join(dirpath, filename)
+            if os.path.islink(full_path_abs):
+                continue
             rel_path = os.path.relpath(full_path_abs, top_folder)
             try:
                 stat = os.stat(full_path_abs)
