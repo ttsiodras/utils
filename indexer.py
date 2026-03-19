@@ -48,7 +48,7 @@ class FileRecord(NamedTuple):
 
 class LimitCheckResult(NamedTuple):
     """Result of a limit check query."""
-    full_path: SafeRelPath
+    filename: SafeFilename
     md5: HashResult
     copies: int
 
@@ -203,9 +203,9 @@ class FileDB:
         distinct top_folders.
         """
         cursor = self.conn.execute('''
-            SELECT full_path, md5, COUNT(DISTINCT top_folder) AS copies
+            SELECT filename, md5, COUNT(DISTINCT top_folder) AS copies
             FROM files
-            GROUP BY full_path, md5
+            GROUP BY filename, md5
             HAVING copies < ?''', (limit,))
         return [LimitCheckResult(*row) for row in cursor]
 
@@ -306,9 +306,9 @@ def run_limit_check(db: FileDB, limit: int, report_path: str) -> None:
     """
     results = db.query_limit(limit)
     with open(report_path, 'w', encoding='utf-8', errors='replace') as f:
-        for full_path, _, copies in results:
-            path_str = to_printable(full_path)
-            f.write(f"{path_str}#@#{copies}\n")
+        for filename, md5, copies in results:
+            filename_str = to_printable(filename)
+            f.write(f"{filename_str}#@#{md5}#@#{copies}\n")
 
 
 def scan_target(
