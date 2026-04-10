@@ -397,6 +397,8 @@ def dupes(db_path: str, threshold: int, dry_run: bool, rescan: bool) -> None:
         if not existing:
             print("  Skipping -- no files exist.\n")
             continue
+        if len(existing) == 1:
+            continue
 
         if dry_run:
             print("  [dry-run] would open in feh\n")
