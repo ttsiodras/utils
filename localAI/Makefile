@@ -1,4 +1,31 @@
 all:
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t adk \
+	  -f Dockerfile.base.adk \
+	  .
+
+pi:
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t pi  \
+	  -f Dockerfile.base.pi \
+	  .
+
+pi-google:
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t pi-goolge  \
+	  -f Dockerfile.base.googleai.pi \
+	  .
+
+big:
 	# Build the GPT-OSS-120b claude code image
 	docker build \
 	  --build-arg UID=$$(id -u) \
@@ -25,6 +52,7 @@ all:
 	  -t claude-qwen3-next-80b-a3b-instruct-gptq-int4a16 \
 	  -f Dockerfile.base.vllm \
 	  .
+qwen:
 	# Build the Qwen3.5-122B-A10B
 	docker build \
 	  --build-arg UID=$$(id -u) \
