@@ -155,7 +155,7 @@ parse_server_line() {
         port="${BASH_REMATCH[2]}"
     elif [[ "$line" =~ ^(([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?)(:([0-9]{1,5}))?$ ]]; then
         target="${BASH_REMATCH[1]}"
-        port="${BASH_REMATCH[6]:-}"
+        port="${BASH_REMATCH[5]:-}"
     elif [[ "$line" =~ ^([A-Za-z0-9._-]+):([0-9]{1,5})$ ]]; then
         target="${BASH_REMATCH[1]}"
         port="${BASH_REMATCH[2]}"
