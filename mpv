@@ -1,3 +1,0 @@
-#!/bin/bash
-# Dramatically better performance of video decoding via VAAPI.
-exec /usr/bin/mpv -ao=pulse --hwdec=vaapi "$@"
