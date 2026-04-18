@@ -21,7 +21,7 @@ pi-google:
 	  --build-arg UID=$$(id -u) \
 	  --build-arg GID=$$(id -g) \
 	  --build-arg USERNAME=$$(whoami) \
-	  -t pi-goolge  \
+	  -t pi-google  \
 	  -f Dockerfile.base.googleai.pi \
 	  .
 
