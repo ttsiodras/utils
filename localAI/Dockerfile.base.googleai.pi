@@ -15,7 +15,7 @@ RUN apt update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Pi Agent
-RUN echo Again ; npm install -g @mariozechner/pi-coding-agent
+RUN npm install -g @mariozechner/pi-coding-agent
 
 USER ${USERNAME}
 ENV HOME=/home/${USERNAME}
