@@ -34,4 +34,5 @@ RUN echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.bashrc && \
     echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.profile
 ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
 
+RUN mkdir -p ${HOME}/.pi/agent/sessions
 CMD ["bash"]
