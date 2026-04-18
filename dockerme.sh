@@ -23,7 +23,7 @@ DRI=/dev/dri/card0
 touch ${XAUTH}
 xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
 
-ROOT="-u user"
+ROOT="-u 1000"
 NETWORK="--network=none"
 PORT=""
 
@@ -61,4 +61,6 @@ exec docker run --rm $ROOT $NETWORK -it                      \
         -v ${XAUTH}:${XAUTH}                                 \
         -w /workdir                                          \
         ${PORT}                                              \
-        fasting3
+        fasting
+
+rm -f /tmp/.docker.xauth*
