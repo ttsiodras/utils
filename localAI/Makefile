@@ -16,15 +16,6 @@ pi:
 	  -f Dockerfile.base.pi \
 	  .
 
-pi-google:
-	docker build \
-	  --build-arg UID=$$(id -u) \
-	  --build-arg GID=$$(id -g) \
-	  --build-arg USERNAME=$$(whoami) \
-	  -t pi-google  \
-	  -f Dockerfile.base.googleai.pi \
-	  .
-
 big:
 	# Build the GPT-OSS-120b claude code image
 	docker build \
