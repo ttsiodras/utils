@@ -6,7 +6,7 @@ ARG GID
 
 # Install core dependencies
 RUN apt update && \
-    apt install -y curl busybox python3-dev python3-venv gcc g++ make bear sqlite3 git fd-find ripgrep && \
+    apt install -y curl busybox python3-dev python3-venv gcc g++ make bear sqlite3 git fd-find ripgrep tmux && \
     ln -s $(which fdfind) /usr/local/bin/fd && \
     getent group | grep :${GID}: >/dev/null || groupadd --gid ${GID} ${USERNAME} && \
     useradd --uid ${UID} --gid ${GID} --create-home --shell /bin/bash ${USERNAME} && \
@@ -19,11 +19,23 @@ RUN npm install -g @mariozechner/pi-coding-agent
 
 USER ${USERNAME}
 
+ENV HOME=/home/${USERNAME}
+
+# Install Pi SubAgents
+
+ENV NPM_PREFIX=/home/${USERNAME}/.npm-global
+ENV PATH="/home/${USERNAME}/.npm-global/bin:/home/${USERNAME}/.venv/bin:$PATH"
+RUN mkdir -p ${HOME}/.npm-global && \
+    npm config set prefix "${HOME}/.npm-global" && \
+    npm install -g @mariozechner/pi-coding-agent
+RUN pi install npm:@tintinweb/pi-subagents
+
+# General config
+
 ENV COLORTERM=truecolor
 ENV TERM=xterm-256color
 ENV NO_TELEMETRY=1
 ENV DO_NOT_TRACK=1
-ENV HOME=/home/${USERNAME}
 
 WORKDIR /home/${USERNAME}
 
@@ -33,6 +45,8 @@ RUN python3 -m venv ${HOME}/.venv && \
 RUN echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.bashrc && \
     echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.profile
 ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
+
+COPY .tmux.conf /home/${USERNAME}/
 
 RUN mkdir -p ${HOME}/.pi/agent/sessions
 CMD ["bash"]
