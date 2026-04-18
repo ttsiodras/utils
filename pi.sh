@@ -69,14 +69,16 @@ EOF
 echo "[-] Remember to:"
 echo "    socat TCP-LISTEN:8000,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8080"
 
-# cp ../pi.AGENTS.md "$TMPDIR_PI"/
-# ...and pass it in the invocation:
-# -v "$TMPDIR_PI/pi.AGENTS.md":"/home/$(id -un)/.pi/agent/AGENTS.md:ro" \
+
+cat > "$TMPDIR_PI/pi.AGENTS.md" << 'OEF'
+When spawning subagents for tasks that don't need an immediate result, always use `run_in_background: true`.
+OEF
 
 docker run --network=restricted_net \
   -w "$PWD" \
   --rm \
   -v "$PWD:$PWD" \
+  -v "$TMPDIR_PI/pi.AGENTS.md":"/home/$(id -un)/.pi/agent/AGENTS.md:ro" \
   -v "$TMPDIR_PI/models.json":"/home/$(id -un)/.pi/agent/models.json:ro" \
   -it pi
 
