@@ -1,4 +1,5 @@
 #!/bin/bash
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 if [ -z "$KITTY_PID" ]; then
     echo "[x] You are not inside kitty — pi depends on the Kitty protocol."
     read -rp "[-] Shall I launch kitty and run pi there? [Y/n] " ANS
@@ -11,7 +12,8 @@ if [ -z "$KITTY_PID" ]; then
     fi
 fi
 
-KEY="......................................."
+source "${SCRIPT_DIR}"/ai.google.key || exit 1
+
 docker run -w "$PWD" --rm -v "$PWD:$PWD" \
     -e GOOGLE_AI_STUDIO_API_KEY="$KEY" \
     -e GEMINI_API_KEY="$KEY" \
