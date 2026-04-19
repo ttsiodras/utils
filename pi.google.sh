@@ -17,4 +17,4 @@ source "${SCRIPT_DIR}"/ai.google.key || exit 1
 docker run -w "$PWD" --rm -v "$PWD:$PWD" \
     -e GOOGLE_AI_STUDIO_API_KEY="$KEY" \
     -e GEMINI_API_KEY="$KEY" \
-    -it pi
+    -it pi pi --model gemma-4-31b-it "$@"
