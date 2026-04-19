@@ -27,7 +27,7 @@ print(data['data'][0]['id'])
 ")
 
 PROPS=$(curl -sf http://localhost:8080/props)
-read CTX_SIZE MAX_TOKENS < <(echo "$PROPS" | python3 -c "
+read -r CTX_SIZE MAX_TOKENS < <(echo "$PROPS" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 slot = data.get('default_generation_settings', {})
