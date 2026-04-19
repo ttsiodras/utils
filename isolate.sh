@@ -1,78 +1,72 @@
 #!/usr/bin/env bash
 #
-# Uses firejail to network-isolate applications.
+# Uses firejail to sandbox applications with:
+#   - Network isolation (no network, or allowlisted IPs/CIDRs/hostnames)
+#   - Filesystem isolation:
+#       * Everything is READABLE (no whitelist hiding)
+#       * $HOME is READ-ONLY by default
+#       * Only explicitly --rw paths are writable (files or directories)
+#       * --hide paths are completely invisible
+#       * /tmp is always private and empty
 #
-# IMPORTANT: This script provides NETWORK isolation only.
-# The sandboxed app can still read/write your home directory,
-# SSH keys, GPG keys, and all files accessible to your user.
-# Use firejail profiles (--profile=) if you also need filesystem isolation.
+# Requirements:  firejail, ip, getent
 #
-# If your kernel supports unprivileged user namespaces (default for most kernels as of 2026),
-# then this will allow simple (non-root) users to completely isolate their app.
+# Kernel: unprivileged user namespaces must be enabled (default on most
+#         kernels as of 2026; check /proc/sys/kernel/unprivileged_userns_clone).
 #
-# It also allows selective servers to pass through; but for that to work, firejail config
-# at /etc/firejail/firejail.config must change the default for restricted-network to: no
-#
-#    $ grep -v ^# /etc/firejail/firejail.config
-#    restricted-network no
-#
-# Since firejail will keep the namespace open until all binaries inside die, the script
-# runs your app from a "superscript"; that kills everything in the process namespace after
-# your app dies.
+# For network allowlisting (--servers), /etc/firejail/firejail.config must have:
+#   restricted-network no
 #
 set -Eeuo pipefail
 
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  isolate.sh [--servers FILE] [--iface IFACE] [--dns IP[,IP...]] [--] app [args...]
+  isolate.sh [OPTIONS] [--] app [args...]
+
+Filesystem options:
+  --rw PATH     Make PATH writable (file or directory). Repeatable.
+                Everything else in $HOME is readable but read-only.
+                /tmp is always private and empty.
+  --hide PATH   Make PATH completely invisible. Repeatable.
+
+Network options:
+  --servers FILE        Allow loopback + only the listed IPs/CIDRs/hostnames.
+                        Without this flag the app gets NO network at all.
+  --iface IFACE         Network interface (auto-detected if omitted).
+  --dns IP[,IP,...]     DNS resolvers reachable at runtime.
 
 Examples:
-  isolate.sh vim src/renderer.cc
-  isolate.sh --servers list_of_servers.txt -- vim src/renderer.cc
-  isolate.sh --servers=list_of_servers.txt --dns=1.1.1.1,9.9.9.9 -- curl https://example.com/
+  # VIM: ~/.vimrc and ~/.vim visible (ro), only listed paths writable:
+  isolate.sh --rw ~/bin --rw ~/.viminfo -- vim ~/bin/pi.sh
 
-Behavior:
-  - Without --servers:
-      run app with localhost only
-  - With --servers:
-      allow loopback plus only the listed remote IPs/CIDRs/hostnames
-      optionally restricted by port
+  # Same, hide SSH keys entirely, allow one server:
+  isolate.sh --rw ~/bin --rw ~/.viminfo --hide ~/.ssh \
+             --servers servers.txt --dns 1.1.1.1 -- vim ~/bin/pi.sh
 
 Servers file format:
   One entry per line. Blank lines and # comments are ignored.
-
   Accepted forms:
-    203.0.113.10
-    203.0.113.10:443
-    203.0.113.0/24
-    203.0.113.0/24:443
-    2001:db8::10
-    2001:db8:abcd::/48
-    [2001:db8::10]:443
-    example.com
-    example.com:443
+    203.0.113.10            203.0.113.10:443
+    203.0.113.0/24          203.0.113.0/24:443
+    2001:db8::10            2001:db8:abcd::/48
+    [2001:db8::10]:443      example.com       example.com:443
 
-Notes:
-  - Hostnames are resolved before entering the sandbox.
-  - Port is optional. If omitted, all ports to that destination are allowed.
-  - If the app itself needs DNS at runtime, pass resolver IPs with --dns.
-
-WARNING: Only network traffic is isolated. The sandboxed process retains full
-  filesystem access as your user. Do not rely on this script to protect sensitive
-  files from a malicious application.
+Isolation model:
+  $HOME is mounted read-only. --rw re-mounts specific paths read-write on
+  top (works for both files and directories). Everything outside $HOME is
+  accessible under normal Unix permissions. /tmp is a fresh private tmpfs.
+  Network traffic is blocked unless whitelisted via --servers.
 EOF
     exit 2
 }
 
-die() {
-    echo "error: $*" >&2
-    exit 1
-}
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-have_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
+die()      { echo "error: $*" >&2; exit 1; }
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 trim() {
     local s="$1"
@@ -81,35 +75,38 @@ trim() {
     printf '%s' "$s"
 }
 
-# : Validate interface name against kernel naming rules
 validate_iface() {
-    local iface="$1"
-    # Linux interface names: max 15 chars, alphanumeric plus . _ -
-    [[ "$iface" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || \
-        die "invalid interface name: '$iface' (must match [A-Za-z0-9._-], max 15 chars)"
+    [[ "$1" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || die "invalid interface name: '$1'"
 }
 
 detect_default_iface() {
     local iface
-    iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+    iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
     [[ -n "${iface:-}" ]] || die "could not detect default network interface; pass --iface"
     validate_iface "$iface"
     printf '%s\n' "$iface"
 }
 
-is_ipv4_cidr() {
-    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]
-}
+is_ipv4_cidr() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]; }
 
-# RFC-4291 IPv6 regex
 is_ipv6_cidr() {
-    local addr="$1"
-    # Strip optional prefix length (e.g. /48)
-    local bare="${addr%/*}"
-    # Must contain at least one colon and consist only of hex digits and colons
-    # Allows compressed notation (::) and full 8-group notation
+    local bare="${1%/*}"
     [[ "$bare" =~ ^[0-9A-Fa-f:]+$ && "$bare" == *:* ]]
 }
+
+safe_tmpdir() {
+    local candidate="${XDG_RUNTIME_DIR:-}"
+    if [[ -n "$candidate" && "$candidate" == /* && -d "$candidate" && -w "$candidate" ]]; then
+        local owner
+        owner="$(stat -c '%u' "$candidate" 2>/dev/null || echo "")"
+        [[ "$owner" == "$(id -u)" ]] && printf '%s' "$candidate" && return
+    fi
+    printf '/tmp'
+}
+
+# ---------------------------------------------------------------------------
+# iptables rule builders
+# ---------------------------------------------------------------------------
 
 append_v4_rule() {
     local addr="$1" port="${2:-}"
@@ -131,140 +128,96 @@ append_v6_rule() {
     fi
 }
 
-# : Validate that resolved addresses are actually IPs before writing rules
 validate_and_add_destination() {
     local addr="$1" port="${2:-}"
-    if is_ipv4_cidr "$addr"; then
-        append_v4_rule "$addr" "$port"
-    elif is_ipv6_cidr "$addr"; then
-        append_v6_rule "$addr" "$port"
-    else
-        die "resolved address is not a valid IP: '$addr'"
+    if   is_ipv4_cidr "$addr"; then append_v4_rule "$addr" "$port"
+    elif is_ipv6_cidr "$addr"; then append_v6_rule "$addr" "$port"
+    else die "resolved address is not a valid IP: '$addr'"
     fi
 }
 
 resolve_hostname() {
-    local host="$1"
-    local out
+    local host="$1" out ip
     local -a addrs=()
-
     if out="$(getent ahostsv4 "$host" 2>/dev/null)"; then
-        while read -r ip _; do
-            [[ -n "${ip:-}" ]] || continue
-            addrs+=("$ip")
-        done <<< "$out"
+        while read -r ip _; do [[ -n "${ip:-}" ]] && addrs+=("$ip"); done <<< "$out"
     fi
-
     if out="$(getent ahostsv6 "$host" 2>/dev/null)"; then
-        while read -r ip _; do
-            [[ -n "${ip:-}" ]] || continue
-            addrs+=("$ip")
-        done <<< "$out"
+        while read -r ip _; do [[ -n "${ip:-}" ]] && addrs+=("$ip"); done <<< "$out"
     fi
-
-    if [[ ${#addrs[@]} -eq 0 ]]; then
-        die "failed to resolve hostname: $host"
-    fi
-
+    [[ ${#addrs[@]} -gt 0 ]] || die "failed to resolve hostname: $host"
     printf '%s\n' "${addrs[@]}" | awk '!seen[$0]++'
 }
 
 parse_server_line() {
-    local line="$1"
-    local target=""
-    local port=""
-    local resolved
+    local line="$1" target="" port="" resolved
 
-    if [[ "$line" =~ ^\[([0-9A-Fa-f:]+)\]:([0-9]{1,5})$ ]]; then
-        target="${BASH_REMATCH[1]}"
-        port="${BASH_REMATCH[2]}"
+    if   [[ "$line" =~ ^\[([0-9A-Fa-f:]+)\]:([0-9]{1,5})$ ]]; then
+        target="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"
     elif [[ "$line" =~ ^(([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?)(:([0-9]{1,5}))?$ ]]; then
-        target="${BASH_REMATCH[1]}"
-        port="${BASH_REMATCH[5]:-}"
+        target="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[5]:-}"
     elif [[ "$line" =~ ^([A-Za-z0-9._-]+):([0-9]{1,5})$ ]]; then
-        target="${BASH_REMATCH[1]}"
-        port="${BASH_REMATCH[2]}"
+        target="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"
     else
-        target="$line"
-        port=""
+        target="$line"; port=""
     fi
 
     if [[ -n "$port" ]]; then
-        [[ "$port" =~ ^[0-9]{1,5}$ ]] || die "invalid port in entry: '$line'"
-        (( port >= 1 && port <= 65535 )) || die "port out of range in entry: '$line'"
+        [[ "$port" =~ ^[0-9]{1,5}$ ]]   || die "invalid port in: '$line'"
+        (( port >= 1 && port <= 65535 )) || die "port out of range in: '$line'"
     fi
 
     if is_ipv4_cidr "$target" || is_ipv6_cidr "$target"; then
-        validate_and_add_destination "$target" "$port"
-        return
+        validate_and_add_destination "$target" "$port"; return
     fi
 
     while IFS= read -r resolved; do
-        [[ -n "$resolved" ]] || continue
-        validate_and_add_destination "$resolved" "$port"
+        [[ -n "$resolved" ]] && validate_and_add_destination "$resolved" "$port"
     done < <(resolve_hostname "$target")
 }
 
-SERVERS_FILE=""
-IFACE=""
-DNS_CSV=""
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+SERVERS_FILE="" IFACE="" DNS_CSV=""
+RW_PATHS=() HIDE_PATHS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --servers)
-            [[ $# -ge 2 ]] || usage
-            SERVERS_FILE="$2"
-            shift 2
-            ;;
-        --servers=*)
-            SERVERS_FILE="${1#*=}"
-            shift
-            ;;
-        --iface)
-            [[ $# -ge 2 ]] || usage
-            IFACE="$2"
-            shift 2
-            ;;
-        --iface=*)
-            IFACE="${1#*=}"
-            shift
-            ;;
-        --dns)
-            [[ $# -ge 2 ]] || usage
-            DNS_CSV="$2"
-            shift 2
-            ;;
-        --dns=*)
-            DNS_CSV="${1#*=}"
-            shift
-            ;;
-        --help|-h)
-            usage
-            ;;
-        --)
-            shift
-            break
-            ;;
-        -*)
-            die "unknown option: $1"
-            ;;
-        *)
-            break
-            ;;
+        --servers)   [[ $# -ge 2 ]] || usage; SERVERS_FILE="$2"; shift 2 ;;
+        --servers=*) SERVERS_FILE="${1#*=}"; shift ;;
+        --iface)     [[ $# -ge 2 ]] || usage; IFACE="$2"; shift 2 ;;
+        --iface=*)   IFACE="${1#*=}"; shift ;;
+        --dns)       [[ $# -ge 2 ]] || usage; DNS_CSV="$2"; shift 2 ;;
+        --dns=*)     DNS_CSV="${1#*=}"; shift ;;
+        --rw)        [[ $# -ge 2 ]] || usage; RW_PATHS+=("$2"); shift 2 ;;
+        --rw=*)      RW_PATHS+=("${1#*=}"); shift ;;
+        --hide)      [[ $# -ge 2 ]] || usage; HIDE_PATHS+=("$2"); shift 2 ;;
+        --hide=*)    HIDE_PATHS+=("${1#*=}"); shift ;;
+        --help|-h)   usage ;;
+        --)          shift; break ;;
+        -*)          die "unknown option: $1" ;;
+        *)           break ;;
     esac
 done
 
 [[ $# -ge 1 ]] || usage
+APP=("$@")
+
+# ---------------------------------------------------------------------------
+# Dependency checks
+# ---------------------------------------------------------------------------
 
 have_cmd firejail || die "firejail not found"
 have_cmd ip       || die "'ip' command not found"
 have_cmd getent   || die "'getent' not found"
 
-if [[ -n "$IFACE" ]]; then
-    validate_iface "$IFACE"
-fi
+[[ -n "$IFACE" ]] && validate_iface "$IFACE"
 
-APP=( "$@" )
+# ---------------------------------------------------------------------------
+# Inner script: kills sibling processes after the app exits
+# ---------------------------------------------------------------------------
 
 _ISOLATE_PID=$$
 _ISOLATE_PPID=$PPID
@@ -273,11 +226,9 @@ INNER_SCRIPT='
 set +e
 "$@"
 rc=$?
-
 for round in TERM KILL; do
     for proc in /proc/[0-9]*; do
-        pid=${proc#/proc/}
-        pid=${pid%%/*}
+        pid=${proc#/proc/}; pid=${pid%%/*}
         case "$pid" in
             ""|1|"$_ISOLATE_PID"|"$_ISOLATE_PPID") continue ;;
         esac
@@ -285,60 +236,99 @@ for round in TERM KILL; do
     done
     [ "$round" = TERM ] && sleep 0.2
 done
-
 exit "$rc"
 '
 
+# ---------------------------------------------------------------------------
+# Working directory
+# ---------------------------------------------------------------------------
+
+WORKDIR="$(mktemp -d "$(safe_tmpdir)/isolate-firejail.XXXXXX")"
+chmod 700 "$WORKDIR"
+NFT4="$WORKDIR/allowlist.net"
+NFT6="$WORKDIR/allowlist6.net"
+
+cleanup() { rm -rf "$WORKDIR"; }
+trap cleanup EXIT
+
+# Slurp process substitutions (e.g. --servers <(echo 1.1.1.1)) into a real
+# file immediately, while the fd is still open in the parent shell.
+if [[ -n "$SERVERS_FILE" ]]; then
+    [[ -r "$SERVERS_FILE" ]] || die "cannot read servers file: $SERVERS_FILE"
+    case "$SERVERS_FILE" in
+        /dev/fd/*|/proc/self/fd/*|/proc/"$$"/fd/*)
+            cat "$SERVERS_FILE" > "$WORKDIR/servers.txt"
+            SERVERS_FILE="$WORKDIR/servers.txt" ;;
+    esac
+fi
+
+# ---------------------------------------------------------------------------
+# Build firejail filesystem arguments
+# ---------------------------------------------------------------------------
+#
+# --private-dev   provides minimal /dev (null, tty, pts, random, etc.) and
+#                 is required to trigger the private mount namespace that
+#                 makes --read-only=$HOME actually take effect.
+# --private-tmp   fresh empty /tmp; also helps anchor the private namespace.
+# --read-only=$HOME   makes entire home ro as the base.
+# --read-write=P  re-mounts P rw on top (works for files and directories).
+# --blacklist=P   makes P completely invisible.
+
+REAL_HOME="$(realpath "$HOME")"
+
+FJ_FS_ARGS=(
+    --private-dev
+    --private-tmp
+    --read-only="$REAL_HOME"
+)
+
+for p in "${RW_PATHS[@]+"${RW_PATHS[@]}"}"; do
+    p="$(realpath -m "$p")"
+    [[ -e "$p" ]] || die "--rw path does not exist: $p"
+    FJ_FS_ARGS+=(--read-write="$p")
+done
+
+for p in "${HIDE_PATHS[@]+"${HIDE_PATHS[@]}"}"; do
+    p="$(realpath -m "$p")"
+    FJ_FS_ARGS+=(--blacklist="$p")
+done
+
+# ---------------------------------------------------------------------------
+# Launch helper
+# ---------------------------------------------------------------------------
+
 run_firejail() {
-    exec firejail "$@" -- \
+    exec firejail \
+        --quiet --noprofile \
+        "${FJ_FS_ARGS[@]}" \
+        "$@" \
+        -- \
         env _ISOLATE_PID="$_ISOLATE_PID" _ISOLATE_PPID="$_ISOLATE_PPID" \
         bash -c "$INNER_SCRIPT" isolate-inner "${APP[@]}"
 }
 
-if [[ -z "$SERVERS_FILE" ]]; then
-    run_firejail --quiet --noprofile --net=none
+# ---------------------------------------------------------------------------
+# Network: no-network case
+# ---------------------------------------------------------------------------
+
+if [[ -z "$SERVERS_FILE" && -z "$DNS_CSV" ]]; then
+    run_firejail --net=none
 fi
 
-[[ -r "$SERVERS_FILE" ]] || die "cannot read servers file: $SERVERS_FILE"
+# ---------------------------------------------------------------------------
+# Network: allowlist case
+# ---------------------------------------------------------------------------
 
-if [[ -z "$IFACE" ]]; then
-    IFACE="$(detect_default_iface)"
-fi
-
-# Validate XDG_RUNTIME_DIR before using it as a tempdir parent.
-# It must be an absolute path owned by the current user;
-# fall back to /tmp otherwise.
-_safe_tmpdir() {
-    local candidate="${XDG_RUNTIME_DIR:-}"
-    if [[ -n "$candidate" && "$candidate" == /* ]]; then
-        local owner
-        owner="$(stat -c '%u' "$candidate" 2>/dev/null || echo "")"
-        if [[ "$owner" == "$(id -u)" ]]; then
-            printf '%s' "$candidate"
-            return
-        fi
-    fi
-    printf '/tmp'
-}
-
-TMPDIR_PARENT="$(_safe_tmpdir)"
-WORKDIR="$(mktemp -d "$TMPDIR_PARENT/isolate-firejail.XXXXXX")"
-NFT4="$WORKDIR/allowlist.net"
-NFT6="$WORKDIR/allowlist6.net"
-
-cleanup() {
-    rm -rf "$WORKDIR"
-}
-trap cleanup EXIT
+[[ -z "$IFACE" ]] && IFACE="$(detect_default_iface)"
 
 cat > "$NFT4" <<'EOF'
 *filter
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
 :OUTPUT DROP [0:0]
--A INPUT -i lo -j ACCEPT
+-A INPUT  -i lo -j ACCEPT
 -A OUTPUT -o lo -j ACCEPT
--A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 EOF
 
@@ -347,57 +337,45 @@ cat > "$NFT6" <<'EOF'
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
 :OUTPUT DROP [0:0]
--A INPUT -i lo -j ACCEPT
+-A INPUT  -i lo -j ACCEPT
 -A OUTPUT -o lo -j ACCEPT
--A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 EOF
 
 if [[ -n "$DNS_CSV" ]]; then
     IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
     for dns in "${DNS_ARR[@]}"; do
-        dns="$(trim "$dns")"
-        [[ -n "$dns" ]] || continue
-        if is_ipv4_cidr "$dns"; then
+        dns="$(trim "$dns")"; [[ -n "$dns" ]] || continue
+        if   is_ipv4_cidr "$dns"; then
             printf -- "-A OUTPUT -p udp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT4"
             printf -- "-A OUTPUT -p tcp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT4"
         elif is_ipv6_cidr "$dns"; then
             printf -- "-A OUTPUT -p udp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT6"
             printf -- "-A OUTPUT -p tcp -d %s --dport 53 -j ACCEPT\n" "$dns" >> "$NFT6"
         else
-            die "invalid DNS IP: $dns"
+            die "invalid DNS IP: '$dns' (must be numeric)"
         fi
     done
 fi
 
-while IFS= read -r raw || [[ -n "$raw" ]]; do
-    line="${raw%%#*}"
-    line="$(trim "$line")"
-    [[ -n "$line" ]] || continue
-    parse_server_line "$line"
-done < "$SERVERS_FILE"
+if [[ -n "$SERVERS_FILE" ]]; then
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+        line="${raw%%#*}"; line="$(trim "$line")"
+        [[ -n "$line" ]] && parse_server_line "$line"
+    done < "$SERVERS_FILE"
+fi
 
 printf 'COMMIT\n' >> "$NFT4"
 printf 'COMMIT\n' >> "$NFT6"
 
-FJ_ARGS=(
-    --quiet
-    --noprofile
-)
+FJ_NET_ARGS=(--net="$IFACE" --netfilter="$NFT4" --netfilter6="$NFT6")
 
 if [[ -n "$DNS_CSV" ]]; then
     IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
     for dns in "${DNS_ARR[@]}"; do
-        dns="$(trim "$dns")"
-        [[ -n "$dns" ]] || continue
-        FJ_ARGS+=(--dns="$dns")
+        dns="$(trim "$dns")"; [[ -n "$dns" ]] && FJ_NET_ARGS+=(--dns="$dns")
     done
 fi
 
-FJ_ARGS+=(
-    --net="$IFACE"
-    --netfilter="$NFT4"
-    --netfilter6="$NFT6"
-)
-
-run_firejail "${FJ_ARGS[@]}"
+run_firejail "${FJ_NET_ARGS[@]}"
