@@ -15,12 +15,12 @@ COMMON_ARGS="
 
 GEMMA_ARGS="
   --hf-repo unsloth/gemma-4-E4B-it-GGUF
-  --ctx-size 65536
+  --ctx-size 131072
   --temp 1.0
   --min-p 0.05
   --top-k 64
   --top-p 0.95
-  --parallel 2
+  --parallel 1
 "
 
 QWEN_ARGS="
