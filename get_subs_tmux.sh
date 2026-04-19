@@ -13,9 +13,8 @@ cd "${SCRIPT_DIR}" || exit 1
 SESSION="subs_session"
 
 # Drop previous sub data
-rm -f subs.en*
-rm -f subs.log.txt
-touch subs.log.txt
+rm -f subs.en* subs.log.{txt,json}
+touch subs.log.{txt,json}
 
 # Download fresh new English subs
 yt-dlp.sh --write-auto-subs --write-subs --sub-langs="en" --sub-format "vtt" --skip-download "$@" -o subs || exit 1
@@ -38,6 +37,7 @@ tmux send-keys -t "$SESSION:0.1" "tail -f subs.log.txt" C-m
 
 # Top pane (pane 0): main pipeline, running pi. Issues with pi/docker/newlines are hacked-around by tee :-)
 tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$F and give me a 5 paragraph summary\" \
+    | stdbuf -o0 -e0 tee -a subs.log.json \
     | python3 -u ./pi_parse_stream.py \
     | stdbuf -o0 -e0 tee -a subs.log.txt" C-m
 
