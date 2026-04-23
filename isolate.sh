@@ -224,13 +224,14 @@ _ISOLATE_PPID=$PPID
 
 INNER_SCRIPT='
 set +e
+_INNER_PID=$$
 "$@"
 rc=$?
 for round in TERM KILL; do
     for proc in /proc/[0-9]*; do
         pid=${proc#/proc/}; pid=${pid%%/*}
         case "$pid" in
-            ""|1|"$_ISOLATE_PID"|"$_ISOLATE_PPID") continue ;;
+            ""|1|"$_ISOLATE_PID"|"$_ISOLATE_PPID"|"$_INNER_PID") continue ;;
         esac
         kill -s "$round" "$pid" 2>/dev/null || true
     done
