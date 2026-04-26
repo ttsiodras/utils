@@ -1,2 +1,2 @@
 all:
-	docker build -t yt-dlp -f Dockerfile.yt-dlp .
+	docker build -t yt-dlp -f Dockerfile.yt-dlp.binary .
