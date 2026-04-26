@@ -7,7 +7,7 @@ if [ -z "$KITTY_PID" ]; then
         echo "[-] Aborting."
         exit 1
     else
-        kitty bash "$0" "$@" &
+        kitty bash "$0" "$@" & disown
         exit 0
     fi
 fi
