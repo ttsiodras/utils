@@ -21,14 +21,14 @@ USER ${USERNAME}
 
 ENV HOME=/home/${USERNAME}
 
-# Install Pi SubAgents
-
-ENV NPM_PREFIX=/home/${USERNAME}/.npm-global
-ENV PATH="/home/${USERNAME}/.npm-global/bin:/home/${USERNAME}/.venv/bin:$PATH"
-RUN mkdir -p ${HOME}/.npm-global && \
-    npm config set prefix "${HOME}/.npm-global" && \
-    npm install -g @mariozechner/pi-coding-agent
-RUN pi install npm:@tintinweb/pi-subagents
+# Install Pi SubAgents if you need them
+#
+# ENV NPM_PREFIX=/home/${USERNAME}/.npm-global
+# ENV PATH="/home/${USERNAME}/.npm-global/bin:/home/${USERNAME}/.venv/bin:$PATH"
+# RUN mkdir -p ${HOME}/.npm-global && \
+#     npm config set prefix "${HOME}/.npm-global" && \
+#     npm install -g @mariozechner/pi-coding-agent
+# RUN pi install npm:@tintinweb/pi-subagents
 
 # General config
 
