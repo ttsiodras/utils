@@ -102,8 +102,13 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
     *top_folder* must be an absolute path as bytes. Returns a list of
     ``FileMetadata`` with filename, full_path (relative to top_folder),
     top_folder, mtime, and filesize.
+    
+    Raises FileNotFoundError if the folder does not exist.
     """
+    if not os.path.isdir(top_folder):
+        raise FileNotFoundError(f"Folder does not exist: {to_printable(top_folder)}")
     results: List[FileMetadata] = []
+    count = 0
     for dirpath, _, filenames in os.walk(top_folder, followlinks=False):
         for filename in filenames:
             full_path_abs = os.path.join(dirpath, filename)
@@ -123,6 +128,10 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
                 mtime=mtime,
                 filesize=filesize,
             ))
+            count += 1
+            if count % 1000 == 0:
+                print(f"\r[.] Scanning: {count} files...", end="", flush=True)
+    print()  # Newline after scan completes
     return results
 
 
@@ -248,12 +257,15 @@ def sync_files_with_md5(
     path_to_item: Dict[AbsPath, FileMetadata] = {
         os.path.join(item.top_folder, item.full_path): item for item in files
     }
+    total = len(path_to_item)
+    count = 0
     for abs_bytes, md5 in stream_md5s(list(path_to_item), ncores):
+        count += 1
         item = path_to_item[abs_bytes]
         if md5 is None:
-            print(f"[!] Could not read: {to_printable(abs_bytes)}")
+            print(f"[!] MD5 ERROR, could not read: {to_printable(abs_bytes)}")
         else:
-            print(f"[-] Computed MD5 for {to_printable(abs_bytes)}")
+            print(f"[-] MD5: {count}/{total} files, computed MD5 for {to_printable(abs_bytes)}")
         db.upsert_with_md5(item, md5)
         db.commit()
 
@@ -336,10 +348,18 @@ def compute_md5s_for_matches(
             continue
         abs_bytes: AbsPath = os.path.join(item.top_folder, item.full_path)
         abs_to_key[abs_bytes] = (item.top_folder, item.full_path)
+    total = len(abs_to_key)
+    count = 0
     result: Dict[TopFolderAndFullPath, HashResult] = {}
+    last_percent = -1
     for abs_bytes, md5 in stream_md5s(list(abs_to_key), ncores):
-        print(f"[-] Computed MD5 for {to_printable(abs_bytes)}")
+        count += 1
+        percent = (count / total) * 100
+        if percent >= last_percent + 1 or count == total:
+            print(f"\r[-] Validation: {percent:.2f}% ({count}/{total})", end="", flush=True)
+            last_percent = percent
         result[abs_to_key[abs_bytes]] = md5
+    print()
     return result
 
 
