@@ -131,7 +131,7 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
             count += 1
             if count % 1000 == 0:
                 print(f"\r[.] Scanning: {count} files...", end="", flush=True)
-    print()  # Newline after scan completes
+    print(f"\r[.] Scanning: {count} files...", end="\n", flush=True)
     return results
 
 
