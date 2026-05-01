@@ -70,13 +70,17 @@ def compute_md5(filepath: AbsPath) -> HashResult:
     Returns ``None`` on I/O errors so callers can distinguish unreadable
     files from legitimate results (including empty files).
     """
+    # Initialize the hasher. usedforsecurity=False avoids warnings on systems
+    # where MD5 is flagged as insecure for cryptographic use.
     hasher = hashlib.md5(usedforsecurity=False)
     try:
         with open(filepath, "rb") as f:
+            # Read in 4MB chunks to balance memory usage and I/O throughput.
             for chunk in iter(lambda: f.read(4 * 1024 * 1024), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
     except OSError:
+        # Return None to indicate a failure to read the file (e.g. PermissionError)
         return None
 
 
@@ -91,6 +95,7 @@ def stream_md5s(
     if not paths:
         return
     with ProcessPoolExecutor(max_workers=ncores) as executor:
+        # Map each path to a future to track which path produced which result.
         future_to_path = {executor.submit(compute_md5, p): p for p in paths}
         for future in as_completed(future_to_path):
             yield future_to_path[future], future.result()
@@ -102,7 +107,7 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
     *top_folder* must be an absolute path as bytes. Returns a list of
     ``FileMetadata`` with filename, full_path (relative to top_folder),
     top_folder, mtime, and filesize.
-    
+
     Raises FileNotFoundError if the folder does not exist.
     """
     if not os.path.isdir(top_folder):
@@ -112,6 +117,7 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
     for dirpath, _, filenames in os.walk(top_folder, followlinks=False):
         for filename in filenames:
             full_path_abs = os.path.join(dirpath, filename)
+            # Skip symbolic links to prevent infinite loops or scanning outside top_folder.
             if os.path.islink(full_path_abs):
                 continue
             rel_path = os.path.relpath(full_path_abs, top_folder)
@@ -120,6 +126,7 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
                 mtime = stat.st_mtime
                 filesize = stat.st_size
             except OSError:
+                # Skip files that cannot be accessed (e.g. permission denied).
                 continue
             results.append(FileMetadata(
                 filename=filename,
@@ -152,7 +159,7 @@ class FileDB:
         self.close()
 
     def _ensure_table(self) -> None:
-        """Create the files table if it doesn't exist."""
+        """Create the files table and indexes if they don't exist."""
         self.conn.execute('''
             CREATE TABLE IF NOT EXISTS files (
                 filename BLOB NOT NULL,
@@ -164,6 +171,8 @@ class FileDB:
                 PRIMARY KEY (top_folder, full_path)
             )
         ''')
+        # Index on md5 speeds up duplicate detection in query_limit()
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_md5 ON files(md5)')
         self.conn.commit()
 
     def load_folder(
@@ -254,6 +263,7 @@ def sync_files_with_md5(
     """Compute MD5s for *files*, printing and committing each result as it arrives."""
     if not files:
         return
+    # Map absolute paths back to Metadata objects to retrieve context after hashing.
     path_to_item: Dict[AbsPath, FileMetadata] = {
         os.path.join(item.top_folder, item.full_path): item for item in files
     }
@@ -266,6 +276,8 @@ def sync_files_with_md5(
             print(f"[!] MD5 ERROR, could not read: {to_printable(abs_bytes)}")
         else:
             print(f"[-] MD5: {count}/{total} files, computed MD5 for {to_printable(abs_bytes)}")
+        # Update the database immediately for this file.
+        # Frequent commits ensure data is saved on crash.
         db.upsert_with_md5(item, md5)
         db.commit()
 
@@ -277,14 +289,20 @@ def find_changes(
     fs_data = scan_folder(top_folder_bytes)
     db_data = db.load_folder(top_folder_bytes)
     fs_paths = {item.full_path for item in fs_data}
+
     to_insert: Insertions = []
     to_update: Updates = []
+
     for item in fs_data:
         key = (top_folder_bytes, item.full_path)
         if key not in db_data:
+            # File exists on disk but not in DB.
             to_insert.append(item)
         elif db_data[key].mtime != item.mtime or db_data[key].filesize != item.filesize:
+            # File metadata (mtime or size) changed; requires re-hashing.
             to_update.append(item)
+
+    # Identify files in DB that are no longer present on the filesystem.
     to_delete: Deletions = [
         (tf, fp) for (tf, fp) in db_data if fp not in fs_paths
     ]
@@ -314,7 +332,7 @@ def perform_sync(db: FileDB, top_folder: str, ncores: int) -> None:
 def run_limit_check(db: FileDB, limit: int, report_path: str) -> None:
     """Run the limit check and write results to *report_path*.
 
-    Each line has the form: ``<full_path>#@#<existing_copy_count>``
+    Each line has the form: ``<full_path>#@#<existing_copy_count> <md5>``
     """
     results = db.query_limit(limit)
     with open(report_path, 'w', encoding='utf-8', errors='replace') as f:
@@ -351,7 +369,7 @@ def compute_md5s_for_matches(
     total = len(abs_to_key)
     count = 0
     result: Dict[TopFolderAndFullPath, HashResult] = {}
-    last_percent = -1
+    last_percent = -1.0
     for abs_bytes, md5 in stream_md5s(list(abs_to_key), ncores):
         count += 1
         percent = (count / total) * 100
@@ -404,8 +422,10 @@ def write_report(
         if mismatch:
             f.write("=== MISMATCH ===\n")
             for tf, p, exp, act in mismatch:
+                exp_str = "UNREADABLE" if exp is None else exp
+                actual_str = "UNREADABLE" if act is None else act
                 line = (f"MISMATCH: {to_printable(tf)}/{to_printable(p)} "
-                        f"(expected={exp}, actual={act})")
+                        f"(expected={exp_str}, actual={actual_str})")
                 print(f"[!] {line}")
                 f.write(f"{line}\n")
             f.write("\n")
@@ -484,20 +504,29 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Entry point: parse arguments and dispatch to the appropriate mode."""
     args = parse_args()
+
+    # Determine number of worker processes.
     ncores: int = (
         args.ncores if (args.ncores is not None and args.ncores > 0)
         else (os.cpu_count() or 1)
     )
+
     with FileDB(args.db) as db:
         if args.validate is not None:
+            # Mode 1: Validate existing DB against current filesystem state.
             run_validation(db, args.validate, args.report, ncores)
             print(f"[-] Validation complete. Report written to {args.report}")
         elif args.limit is not None:
+            # Mode 2: Sync all provided folders, then find files with low redundancy.
             for folder in args.top_folder:
                 perform_sync(db, folder, ncores)
             run_limit_check(db, args.limit, args.report)
             print(f"[-] Limit check complete. Report written to {args.report}")
         else:
+            # Mode 3: Standard single folder synchronization.
+            if not args.top_folder:
+                print("Error: No top folder provided for sync.")
+                sys.exit(1)
             perform_sync(db, args.top_folder[0], ncores)
             print(f"[-] DB sync complete for {args.top_folder[0]}")
 
