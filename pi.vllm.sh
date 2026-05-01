@@ -13,7 +13,7 @@ if [ -z "$KITTY_PID" ]; then
 fi
 
 # Query vllm for the currently loaded model
-MODELS_JSON=$(curl -sf http://localhost:8080/v1/models)
+MODELS_JSON=$(curl -sf http://localhost:8081/v1/models)
 if [ $? -ne 0 ] || [ -z "$MODELS_JSON" ]; then
   echo "[-] Could not reach vllm at localhost:8080 — is it running?"
   exit 1
@@ -60,7 +60,7 @@ cat > "$TMPDIR_PI/models.json" << EOF
 EOF
 
 echo "[-] Remember to:"
-echo "    socat TCP-LISTEN:8080,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8080"
+echo "    socat TCP-LISTEN:8080,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8081"
 
 cat > "$TMPDIR_PI/pi.AGENTS.md" << 'OEF'
 When spawning subagents for tasks that don't need an immediate result, always use `run_in_background: true`.
