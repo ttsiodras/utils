@@ -47,6 +47,7 @@ RUN echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.bashrc && \
 ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
 
 COPY .tmux.conf /home/${USERNAME}/
+COPY pi.extensions /home/${USERNAME}/.pi/agent/extensions
 
 RUN mkdir -p ${HOME}/.pi/agent/sessions
 CMD ["bash"]
