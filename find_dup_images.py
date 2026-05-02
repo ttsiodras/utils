@@ -3,10 +3,11 @@
 imagescan.py — Recursive image scanner with perceptual hashing and similarity viewer.
 
 Usage:
-  python imagescan.py scan <folder> [--db PATH]
+  python imagescan.py scan <folder> [--db PATH] [--ncores N]
       Recursively scan <folder>, compute perceptual hashes, store in SQLite DB.
       Re-runs only process changed/new files and prune deleted ones.
       Any change to the image table automatically invalidates the similarity cache.
+      Uses parallel processing for hash computation.
 
   python imagescan.py dupes [--db PATH] [--threshold N] [--dry-run] [--rescan]
       Find similar images (hamming distance <= threshold, default 10),
@@ -19,6 +20,7 @@ Options:
   --threshold N     Max hamming distance to consider images similar (default: 10)
   --dry-run         Print groups without launching feh
   --rescan          Ignore cached similarity results and recompute
+  --ncores N        Number of CPU cores for parallel hashing (default: all available)
 """
 
 import argparse
@@ -29,6 +31,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import cpu_count
 from pathlib import Path
 
 try:
@@ -169,7 +173,17 @@ def compute_record(path: Path, top_folder: str) -> dict | None:
     }
 
 
-def scan(folder: str, db_path: str) -> None:
+def compute_record_worker(args):
+    """Worker function for parallel processing. Takes (path_str, top_folder, size, mtime) tuple.
+    
+    Note: size and mtime are passed for compatibility but not used in computation.
+    """
+    path_str, top_folder = args[0], args[1]
+    path = Path(path_str)
+    return compute_record(path, top_folder)
+
+
+def scan(folder: str, db_path: str, ncores: int) -> None:
     root = Path(folder).resolve()
     if not root.is_dir():
         sys.exit(f"Not a directory: {folder}")
@@ -180,7 +194,20 @@ def scan(folder: str, db_path: str) -> None:
     found_paths: set[str] = set()
     inserted = updated = skipped = removed = errors = 0
 
+    # Collect all image paths first
+    image_tasks: list[tuple[str, str, int, float]] = []  # [(path_str, top_folder, size, mtime), ...]
     print(f"Scanning {root} ...")
+
+    try:
+        from tqdm import tqdm
+        # First pass: count files for progress bar
+        file_count = sum(
+            1 for _ in root.rglob("*")
+            if _.is_file() and _.suffix.lower() in IMAGE_EXTENSIONS and not _.is_symlink()
+        )
+        scan_pbar = tqdm(total=file_count, desc="Collecting", unit="file", leave=False)
+    except ImportError:
+        scan_pbar = None
 
     for dirpath, _dirs, files in os.walk(root):
         for fname in files:
@@ -191,20 +218,12 @@ def scan(folder: str, db_path: str) -> None:
             abs_path = str(fpath.resolve())
             found_paths.add(abs_path)
 
+            if scan_pbar:
+                scan_pbar.update(1)
+
             try:
                 stat = fpath.stat()
             except OSError:
-                continue
-
-            existing = indexed.get(abs_path)
-
-            # Skip unchanged files
-            if (
-                existing
-                and existing["file_size"] == stat.st_size
-                and abs(existing["mtime"] - stat.st_mtime) < 0.01
-            ):
-                skipped += 1
                 continue
 
             # Determine top_folder (immediate child of root that contains this file)
@@ -214,30 +233,90 @@ def scan(folder: str, db_path: str) -> None:
             except ValueError:
                 top_folder = "."
 
-            record = compute_record(fpath, top_folder)
-            if record is None:
-                errors += 1
+            # Check if file is unchanged from indexed version
+            existing = indexed.get(abs_path)
+            if (
+                existing
+                and existing["file_size"] == stat.st_size
+                and abs(existing["mtime"] - stat.st_mtime) < 0.01
+            ):
+                skipped += 1
                 continue
 
-            if existing:
-                conn.execute(
-                    """UPDATE images SET top_folder=:top_folder, filename=:filename,
-                       width=:width, height=:height, phash=:phash,
-                       file_size=:file_size, mtime=:mtime
-                       WHERE full_path=:full_path""",
-                    record,
-                )
-                updated += 1
-                print(f"  updated  {abs_path}")
-            else:
-                conn.execute(
-                    """INSERT INTO images
-                       (top_folder, filename, full_path, width, height, phash, file_size, mtime)
-                       VALUES (:top_folder, :filename, :full_path, :width, :height, :phash, :file_size, :mtime)""",
-                    record,
-                )
-                inserted += 1
-                print(f"  inserted {abs_path}")
+            image_tasks.append((abs_path, top_folder, stat.st_size, stat.st_mtime))
+
+    if scan_pbar:
+        scan_pbar.close()
+
+    # Process images in parallel
+    records: dict[str, dict] = {}
+    total = len(image_tasks)
+
+    if ncores > 1:
+        with ProcessPoolExecutor(max_workers=ncores) as executor:
+            futures = [executor.submit(compute_record_worker, task) for task in image_tasks]
+            try:
+                from tqdm import tqdm
+                iterator = tqdm(futures, desc="Hashing images", unit="img", total=total)
+            except ImportError:
+                iterator = futures
+                print(f"Hashing {total} images...")
+            
+            for future in iterator:
+                record = future.result()
+                if record:
+                    records[record["full_path"]] = record
+    else:
+        # Sequential processing
+        try:
+            from tqdm import tqdm
+            iterator = tqdm(image_tasks, desc="Hashing images", unit="img", total=total)
+        except ImportError:
+            iterator = image_tasks
+            print(f"Hashing {total} images...")
+        
+        for task in iterator:
+            record = compute_record_worker(task)
+            if record:
+                records[record["full_path"]] = record
+
+    # Write results to database
+    for abs_path in sorted(found_paths):
+        existing = indexed.get(abs_path)
+        record = records.get(abs_path)
+
+        # If file is already indexed and unchanged (no new record), skip it
+        if existing and not record:
+            continue
+
+        if not record:
+            errors += 1
+            continue
+
+        try:
+            stat = Path(abs_path).stat()
+        except OSError:
+            continue
+
+        if existing:
+            conn.execute(
+                """UPDATE images SET top_folder=:top_folder, filename=:filename,
+                   width=:width, height=:height, phash=:phash,
+                   file_size=:file_size, mtime=:mtime
+                   WHERE full_path=:full_path""",
+                record,
+            )
+            updated += 1
+            print(f"  updated  {abs_path}")
+        else:
+            conn.execute(
+                """INSERT INTO images
+                   (top_folder, filename, full_path, width, height, phash, file_size, mtime)
+                   VALUES (:top_folder, :filename, :full_path, :width, :height, :phash, :file_size, :mtime)""",
+                record,
+            )
+            inserted += 1
+            print(f"  inserted {abs_path}")
 
     # Prune deleted entries that lived under the scanned root
     for abs_path, row in indexed.items():
@@ -426,6 +505,8 @@ def build_parser() -> argparse.ArgumentParser:
     # scan
     sp = sub.add_parser("scan", help="Scan a folder tree and hash images")
     sp.add_argument("folder", help="Root folder to scan")
+    sp.add_argument("--ncores", type=int, default=None,
+                    help="Number of CPU cores to use for hashing (default: all available)")
 
     # dupes
     dp = sub.add_parser("dupes", help="Find similar images and view groups in feh")
@@ -444,7 +525,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
-        scan(args.folder, args.db)
+        ncores = args.ncores if args.ncores and args.ncores > 0 else cpu_count()
+        scan(args.folder, args.db, ncores)
     elif args.command == "dupes":
         dupes(args.db, args.threshold, args.dry_run, args.rescan)
 
