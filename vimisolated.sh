@@ -51,6 +51,24 @@ add_rw() {
     fi
 }
 
+# Find git root starting from a given directory and walk up.
+# If a .git folder is found, add its parent directory to R/W list.
+add_rw_git_root() {
+    local start="$1"
+    local current="$start"
+    while [[ "$current" != "/" ]]; do
+        if [[ -d "$current/.git" ]]; then
+            add_rw "$current"
+            return 0
+        fi
+        current="$(dirname "$current")"
+    done
+    return 1
+}
+
+# Add git root from $PWD if found
+add_rw_git_root "$PWD"
+
 # Make a path absolute without resolving any symlinks.
 abs_no_resolve() {
     local p="$1"
