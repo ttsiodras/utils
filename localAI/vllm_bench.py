@@ -1,4 +1,4 @@
-#! vllm/.venv/bin/python3
+#! /usr/bin/env python3
 """
 Vibe-coded from Qwen3.5-122B. Works nicely!
 """
@@ -135,7 +135,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Lightweight vLLM Client-side Benchmark")
     parser.add_argument("--url", type=str, help="vLLM endpoint (e.g. http://<IP>:8000/v1/chat/completions)", default='http://127.0.0.1:8081/v1/chat/completions')
-    parser.add_argument("--dataset", type=str, help="Path to sharegpt_data.json (.json or .zst)", default='vllm/sharegpt_data.json.zst')
+    parser.add_argument("--dataset", type=str, help="Path to sharegpt_data.json (.json or .zst)", default='sharegpt_data.json.zst')
     parser.add_argument("--num-prompts", type=int, default=500, help="Number of prompts to run")
     parser.add_argument("--concurrency", type=int, default=64, help="Number of simultaneous requests")
 
