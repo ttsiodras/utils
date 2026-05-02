@@ -36,7 +36,7 @@ tmux split-window -v -t "$SESSION:0" -p 90 -c "$SCRIPT_DIR"
 tmux send-keys -t "$SESSION:0.1" "tail -f subs.log.txt" C-m
 
 # Top pane (pane 0): main pipeline, running pi. Issues with pi/docker/newlines are hacked-around by tee :-)
-tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$F and give me a 5 paragraph summary\" \
+tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$F and give me a 5-10 paragraph summary, making sure you dont miss the important points\" \
     | stdbuf -o0 -e0 tee -a subs.log.json \
     | python3 -u ./pi_parse_stream.py \
     | stdbuf -o0 -e0 tee -a subs.log.txt" C-m
