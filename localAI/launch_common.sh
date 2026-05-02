@@ -1,10 +1,10 @@
 # launch_common.sh  (sourced, not executed directly)
 
-LLAMA_SERVER=./build/bin/llama-server
+LLAMA_SERVER=/home/stablediffusion/llama.cpp.prismML/build/bin/llama-server
 
 COMMON_ARGS="
   --offline
-  --host 0.0.0.0
+  --host 127.0.0.1
   --port 8080
   --fit on
   --jinja
@@ -23,9 +23,9 @@ GEMMA_ARGS="
   --parallel 1
 "
 
-QWEN_ARGS="
-  --hf-repo unsloth/Qwen3.6-35B-A3B-GGUF
-  --ctx-size 32768
+TERN_ARGS="
+  --hf-repo prism-ml/Ternary-Bonsai-8B-gguf
+  --ctx-size 0
   --temp 0.6
   --min-p 0.0
   --top-k 20
