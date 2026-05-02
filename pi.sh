@@ -14,9 +14,9 @@ if [ -z "$KITTY_PID" ]; then
 fi
 
 # Query llama.cpp for the currently loaded model
-MODELS_JSON=$(curl -sf http://localhost:8080/v1/models)
+MODELS_JSON=$(curl -sf http://localhost:8081/v1/models)
 if [ $? -ne 0 ] || [ -z "$MODELS_JSON" ]; then
-  echo "[-] Could not reach llama.cpp at localhost:8080 — is it running?"
+  echo "[-] Could not reach llama.cpp at localhost:8081 — is it running?"
   exit 1
 fi
 
@@ -26,7 +26,7 @@ data = json.load(sys.stdin)
 print(data['data'][0]['id'])
 ")
 
-PROPS=$(curl -sf http://localhost:8080/props)
+PROPS=$(curl -sf http://localhost:8081/props)
 read -r CTX_SIZE MAX_TOKENS < <(echo "$PROPS" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -44,7 +44,7 @@ cat > "$TMPDIR_PI/models.json" << EOF
 {
   "providers": {
     "local-llamacpp": {
-      "baseUrl": "http://172.17.0.1:8000/v1",
+      "baseUrl": "http://172.17.0.1:8080/v1",
       "api": "openai-completions",
       "apiKey": "dummy",
       "compat": {
@@ -67,7 +67,7 @@ cat > "$TMPDIR_PI/models.json" << EOF
 EOF
 
 echo "[-] Remember to:"
-echo "    socat TCP-LISTEN:8000,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8080"
+echo "    socat TCP-LISTEN:8081,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8081"
 
 
 cat > "$TMPDIR_PI/pi.AGENTS.md" << 'OEF'
