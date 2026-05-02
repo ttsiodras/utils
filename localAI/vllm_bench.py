@@ -58,7 +58,9 @@ def get_dataset(args):
             with open(args.dataset, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception as e:
-        print(f"Error loading dataset: {e}")
+        print(f"Error loading dataset: {e} - take it and zst compress it; it's here: "
+              "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/"
+              "main/ShareGPT_V3_unfiltered_cleaned_split.json")
         sys.exit(1)
 
 
