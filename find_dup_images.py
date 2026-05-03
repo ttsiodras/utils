@@ -10,10 +10,19 @@ Usage:
       Uses parallel processing for hash computation.
 
   python find_dup_images.py dupes [--db PATH] [--threshold N] [--rescan]
-      Find similar images (hamming distance <= threshold, default 10),
+      Find similar images (hamming distance <= threshold, default: 10),
       group them into streaks, and open each group in feh for review.
       Results are cached in the DB and reused on subsequent runs unless the
       image data changed or --rescan is given.
+
+      Inside feh, you can easily remove the duplicates until one is left;
+      (feh shows the group size - e.g. 1/5). I recommend you set your
+      ~/.config/feh/keys to this:
+
+      $ cat ~/.config/feh/keys
+      delete d
+
+      ...and then you just hit key 'd' and the current image is removed.
 
 Options:
   --db PATH         Path to SQLite database (default: imagescan.db)
@@ -22,19 +31,22 @@ Options:
   --ncores N        Number of CPU cores for parallel hashing (default: all)
 """
 
+from __future__ import annotations
+
 import argparse
+import datetime
 import hashlib
 import json
 import os
 import sqlite3
 import subprocess
 import sys
-import datetime
 import tempfile
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import List, Tuple  # NOQA
+from typing import TypedDict
 
 try:
     from PIL import Image
@@ -57,71 +69,101 @@ except ImportError:
     sys.exit("Missing dependency: pip install tqdm")
 
 # ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+IMAGE_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+    ".tiff", ".tif", ".webp", ".heic", ".heif",
+    ".avif", ".ico", ".ppm", ".pgm", ".pbm",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class ImageRecord:
+    """
+    All data computed for a single image file.
+
+    Example — /home/user/photos/beach.jpg, ~400 kB
+
+        ImageRecord(
+            file_path=Path("/home/user/photos/beach.jpg"),
+            phash="a1b2c3d4e5f67890",
+            file_size=409600, mtime=1700000000.5,  # bytes / Unix time
+    """
+
+    file_path:  Path    # e.g. Path("/home/user/photos/beach.jpg")
+    phash:      str     # e.g. "a1b2c3d4e5f67890" — perceptual hash
+    file_size:  int     # e.g. 409600 — file size in bytes
+    mtime:      float   # e.g. 1700000000.5 — Unix mtime
+
+
+# A similarity group is a list of file paths, all mutually similar.
+# Stored as Path internally; converted to str only at DB/JSON/subprocess
+# boundaries.
+
+SimilarityGroups = list[list[Path]]
+
+
+class ImageRow(TypedDict):
+    """
+    Shape of a row returned by:
+    SELECT full_path, file_size, mtime FROM images
+    """
+    full_path:  str
+    file_size:  int
+    mtime:      float
+
+
+# ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
 
 DDL = """
 CREATE TABLE IF NOT EXISTS images (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    top_folder  TEXT    NOT NULL,
-    filename    TEXT    NOT NULL,
-    full_path   TEXT    NOT NULL UNIQUE,
-    width       INTEGER,
-    height      INTEGER,
-    phash       TEXT,
-    file_size   INTEGER,
-    mtime       REAL
+    full_path   TEXT    NOT NULL PRIMARY KEY,
+    phash       TEXT    NOT NULL,
+    file_size   INTEGER NOT NULL,
+    mtime       REAL    NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_phash     ON images (phash);
-CREATE INDEX IF NOT EXISTS idx_full_path ON images (full_path);
+CREATE INDEX IF NOT EXISTS idx_phash ON images (phash);
 
--- Cached similarity groups.
--- Each row is one group; paths are stored as a JSON array.
--- cache_key is a hash of (sorted phash list + threshold) so it
--- auto-invalidates when images are added/removed/changed.
 CREATE TABLE IF NOT EXISTS similarity_cache (
     cache_key   TEXT PRIMARY KEY,
     threshold   INTEGER NOT NULL,
-    computed_at TEXT NOT NULL,
-    groups_json TEXT NOT NULL        -- JSON: [[path, ...], ...]
+    computed_at TEXT    NOT NULL,
+    groups_json TEXT    NOT NULL
 );
 """
 
-IMAGE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
-    ".tiff", ".tif", ".webp", ".heic", ".heif",
-    ".avif", ".ico", ".ppm", ".pgm", ".pbm",
-}
 
-
-def open_db(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+def open_db(db_path: str) -> sqlite3.Connection:
+    """Open the SQLite DB, run DDL to create/upgrade tables => connection."""
+    conn = sqlite3.connect(db_path)
     conn.executescript(DDL)
     conn.commit()
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def fetch_indexed(conn: sqlite3.Connection) -> dict:
-    """Return {full_path: row} for every record in the DB."""
-    cur = conn.execute("SELECT * FROM images")
-    return {row["full_path"]: row for row in cur.fetchall()}
-
-
 def compute_cache_key(conn: sqlite3.Connection, threshold: int) -> str:
     """
     Stable hash over (sorted list of all phashes in the DB, threshold).
-    Changing any image's phash, adding, or removing images changes this key,
+    Any change to the image set or threshold produces a different key,
     which invalidates the cache automatically.
     """
-    rows = conn.execute(
-        "SELECT phash FROM images WHERE phash IS NOT NULL ORDER BY phash"
-    ).fetchall()
-    digest_input = json.dumps([r["phash"] for r in rows] + [threshold])
-    return hashlib.sha256(digest_input.encode()).hexdigest()
+    phashes = [
+        row["phash"]
+        for row in conn.execute(
+            "SELECT phash FROM images WHERE phash IS NOT NULL ORDER BY phash")
+    ]
+    return hashlib.sha256(
+        json.dumps(phashes + [threshold]).encode()).hexdigest()
 
 
-def load_cache(conn: sqlite3.Connection, cache_key: str) -> list | None:
+def load_cache(
+    conn: sqlite3.Connection, cache_key: str
+) -> SimilarityGroups | None:
     """Return cached groups if the key matches, else None."""
     row = conn.execute(
         "SELECT groups_json, computed_at "
@@ -129,363 +171,416 @@ def load_cache(conn: sqlite3.Connection, cache_key: str) -> list | None:
         (cache_key,),
     ).fetchone()
     if row:
-        print(f"Via cached similarity (computed {row['computed_at']}).")
-        return json.loads(row["groups_json"])
+        print("[-] Using cached similarity results "
+              f"(computed_at {row['computed_at']}).")
+        str_groups: list[list[str]] = json.loads(row["groups_json"])
+        return [[Path(p) for p in g] for g in str_groups]
     return None
 
 
 def save_cache(
-    conn: sqlite3.Connection,
-    cache_key: str,
-    threshold: int,
-    groups: list,
+    conn:        sqlite3.Connection,
+    cache_key:   str,
+    threshold:   int,
+    groups:      SimilarityGroups,
 ) -> None:
     """Persist groups to the cache, replacing any previous entry."""
-    # only ever keep one entry
-    conn.execute("DELETE FROM similarity_cache WHERE 1")
+    conn.execute("DELETE FROM similarity_cache")
+    # Convert Path back to str for JSON serialization
+    serializable_groups: list[list[str]] = [
+        [str(p) for p in g] for g in groups
+    ]
     conn.execute(
-        """INSERT INTO
-           similarity_cache(cache_key, threshold, computed_at, groups_json)
+        """INSERT INTO similarity_cache
+              (cache_key, threshold, computed_at, groups_json)
            VALUES (?, ?, ?, ?)""",
         (
             cache_key,
             threshold,
             datetime.datetime.now().isoformat(timespec="seconds"),
-            json.dumps(groups),
-        ),
+            json.dumps(serializable_groups)),
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Hash computation
+# ---------------------------------------------------------------------------
+
+def compute_record(file_path: Path) -> ImageRecord | None:
+    """Open image, compute perceptual hash. Returns None on failure."""
+    try:
+        with Image.open(file_path) as img:
+            img.load()
+            phash = str(imagehash.phash(img))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # intentionally broad - any decode error must be silent
+        print(f"[!] Could not process {file_path}: {exc}", file=sys.stderr)
+        return None
+
+    stat = file_path.stat()
+    return ImageRecord(
+        file_path=file_path.resolve(),
+        phash=phash,
+        file_size=stat.st_size,
+        mtime=stat.st_mtime)
 
 
 # ---------------------------------------------------------------------------
 # Scan mode
 # ---------------------------------------------------------------------------
 
-def compute_record(path: Path, top_folder: str) -> dict | None:
-    """Open image, compute hash and dimensions. Returns None on failure."""
-    try:
-        with Image.open(path) as img:
-            img.load()
-            width, height = img.size
-            phash = str(imagehash.phash(img))
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        print(f"  [WARN] Could not process {path}: {exc}", file=sys.stderr)
-        return None
-
-    stat = path.stat()
-    return {
-        "top_folder": top_folder,
-        "filename":   path.name,
-        "full_path":  str(path.resolve()),
-        "width":      width,
-        "height":     height,
-        "phash":      phash,
-        "file_size":  stat.st_size,
-        "mtime":      stat.st_mtime,
-    }
-
-
-def compute_record_worker(args):
-    """Worker function for parallel processing.
-    Takes (path_str, top_folder, size, mtime) tuple.
-
-    Note: size and mtime are passed for compatibility
-    but not used in computation.
-    """
-    path_str, top_folder = args[0], args[1]
-    path = Path(path_str)
-    return compute_record(path, top_folder)
-
-
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
+# pylint: disable=too-many-branches,too-many-locals,too-many-statements
 def scan(folder: str, db_path: str, ncores: int) -> None:
+    """
+    Recursively scan `folder`, hash every image, and upsert records in DB.
+
+    Skips unchanged files (size+mtime match the DB entry); idempotent re-runs.
+    Removes DB entries for files that no longer exist on disk.
+    Invalidates the similarity cache whenever the image set changes.
+    """
     root = Path(folder).resolve()
     if not root.is_dir():
-        sys.exit(f"Not a directory: {folder}")
+        sys.exit(f"Not a directory: {root}")
+
+    indexed: dict[str, ImageRow] = {}
 
     conn = open_db(db_path)
-    indexed = fetch_indexed(conn)
+    for row in conn.execute("SELECT full_path, file_size, mtime FROM images"):
+        indexed[row["full_path"]] = row
 
-    found_paths: set[str] = set()
+    # All image paths found on disk during this scan
+    scanned_paths: set[str] = set()
+    tasks: list[Path] = []
+
     inserted = updated = skipped = removed = errors = 0
 
-    # Collect all image paths first
-    # list of [(path_str, top_folder, size, mtime), ...]
-    image_tasks: list[tuple[str, str, int, float]] = []
-    print(f"Scanning {root} ...")
+    # python local var lookups are faster than globals
+    image_extensions = IMAGE_EXTENSIONS
 
-    # First pass: count files for progress bar
+    print(f"[-] Scanning {root} ...")
+
+    # Count files for progress bar (one quick pass)
     file_count = sum(
-        1 for _ in root.rglob("*")
-        if _.is_file() and _.suffix.lower() in IMAGE_EXTENSIONS
-        and not _.is_symlink()
+        1
+        for p in root.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() in image_extensions
+        and not p.is_symlink()
     )
     scan_pbar = tqdm(
         total=file_count, desc="Collecting", unit="file", leave=False)
-    for dirpath, _, files in os.walk(root):  # _ is dirs, unused
-        for fname in files:
+
+    for dirpath, _, filenames in os.walk(root):
+        for fname in filenames:
             fpath = Path(dirpath) / fname
-            if fpath.suffix.lower() not in IMAGE_EXTENSIONS:
+            if fpath.suffix.lower() not in image_extensions:
                 continue
 
-            abs_path = str(fpath.resolve())
-            found_paths.add(abs_path)
-
-            if scan_pbar:
-                scan_pbar.update(1)
+            file_path = str(fpath.resolve())
+            scanned_paths.add(file_path)
+            scan_pbar.update(1)
 
             try:
                 stat = fpath.stat()
             except OSError:
                 continue
 
-            # Determine top_folder (immediate root's child containin this file)
-            try:
-                rel = fpath.relative_to(root)
-                top_folder = rel.parts[0] if len(rel.parts) > 1 else "."
-            except ValueError:
-                top_folder = "."
-
-            # Check if file is unchanged from indexed version
-            existing = indexed.get(abs_path)
+            # Skip if the file hasn't changed since the last scan
+            existing_row = indexed.get(file_path)
             if (
-                existing
-                and existing["file_size"] == stat.st_size
-                and abs(existing["mtime"] - stat.st_mtime) < 0.01
+                existing_row
+                and existing_row["file_size"] == stat.st_size
             ):
-                skipped += 1
-                continue
+                old_mtime = existing_row["mtime"]
+                assert old_mtime is not None
+                if abs(old_mtime - stat.st_mtime) < 0.01:
+                    skipped += 1
+                    continue
 
-            image_tasks.append(
-                (abs_path, top_folder, stat.st_size, stat.st_mtime))
+            tasks.append(Path(file_path))
 
-    if scan_pbar:
-        scan_pbar.close()
+    scan_pbar.close()
 
-    # Process images in parallel
-    records: dict[str, dict] = {}
-    total = len(image_tasks)
+    # Parallel hash computation
+    records: dict[Path, ImageRecord] = {}
+    total = len(tasks)
 
     if ncores > 1:
-        with ProcessPoolExecutor(max_workers=ncores) as executor:
-            futures = [
-                executor.submit(compute_record_worker, task)
-                for task in image_tasks]
+        with ProcessPoolExecutor(max_workers=ncores) as pool:
+            futures = [pool.submit(compute_record, t) for t in tasks]
             iterator = tqdm(
-                futures, desc="Hashing images", unit="img", total=total)
+                futures, desc="[-] Hashing images", unit="img", total=total)
             for future in iterator:
-                record = future.result()
-                if record:
-                    records[record["full_path"]] = record
+                rec = future.result()
+                if rec:
+                    records[rec.file_path] = rec
     else:
-        # Sequential processing
-        iterator = tqdm(
-            image_tasks, desc="Hashing images", unit="img", total=total)
+        iterator = tqdm(tasks, desc="Hashing images", unit="img", total=total)
         for task in iterator:
-            record = compute_record_worker(task)
-            if record:
-                records[record["full_path"]] = record
+            rec = compute_record(task)
+            if rec:
+                records[rec.file_path] = rec
 
-    # Write results to database
-    for abs_path in sorted(found_paths):
-        existing = indexed.get(abs_path)
-        record = records.get(abs_path)
+    # Write results to DB
+    for file_path in sorted(scanned_paths):
+        existing_row = indexed.get(file_path)
+        img_record = records.get(Path(file_path))
 
-        # If file is already indexed and unchanged (no new record), skip it
-        if existing and not record:
+        # In DB and unchanged → nothing to do
+        if existing_row and not img_record:
             continue
 
-        if not record:
+        if not img_record:
             errors += 1
             continue
 
         try:
-            stat = Path(abs_path).stat()
+            stat = Path(file_path).stat()
         except OSError:
             continue
 
-        if existing:
+        if existing_row:
             conn.execute(
-                """UPDATE images
-                   SET top_folder=:top_folder, filename=:filename,
-                       width=:width, height=:height, phash=:phash,
-                       file_size=:file_size, mtime=:mtime
-                   WHERE full_path=:full_path""",
-                record,
+                "UPDATE images SET phash=:phash, file_size=:file_size, "
+                "mtime=:mtime WHERE full_path=:file_path",
+                {
+                    "phash":     img_record.phash,
+                    "file_size": img_record.file_size,
+                    "mtime":     img_record.mtime,
+                    "file_path": str(img_record.file_path),
+                },
             )
             updated += 1
-            print(f"  updated  {abs_path}")
+            print(f"[-] Updated: {file_path}")
         else:
             conn.execute(
-                """INSERT INTO images
-                   (top_folder, filename, full_path, width, height,
-                    phash, file_size, mtime)
-                   VALUES (:top_folder, :filename, :full_path, :width, :height,
-                           :phash, :file_size, :mtime)""",
-                record,
+                "INSERT INTO images (full_path, phash, file_size, mtime) "
+                "VALUES (:file_path, :phash, :file_size, :mtime)",
+                {
+                    "file_path": str(img_record.file_path),
+                    "phash":     img_record.phash,
+                    "file_size": img_record.file_size,
+                    "mtime":     img_record.mtime,
+                },
             )
             inserted += 1
-            print(f"  inserted {abs_path}")
+            print(f"[-] Inserted: {file_path}")
 
-    # Prune deleted entries that lived under the scanned root
-    for abs_path, _ in indexed.items():  # _ is row, unused
-        if abs_path.startswith(str(root)) and abs_path not in found_paths:
-            conn.execute("DELETE FROM images WHERE full_path = ?", (abs_path,))
+    # Prune paths that disappeared from disk
+    for file_path in indexed:
+        if file_path.startswith(str(root)) and file_path not in scanned_paths:
+            conn.execute(
+                "DELETE FROM images WHERE full_path = ?", (file_path,))
             removed += 1
-            print(f"  removed  {abs_path}")
+            print(f"[-] Removed: {file_path}")
 
     conn.commit()
 
-    # Invalidate similarity cache if anything changed
+    # Any structural change to the image table invalidates similarity cache
     if inserted or updated or removed:
-        conn.execute("DELETE FROM similarity_cache WHERE 1")
+        conn.execute("DELETE FROM similarity_cache")
         conn.commit()
-        print("  (similarity cache invalidated)")
+        print("[-]\n[-] Similarity cache invalidated.")
+        print("[-] Re-run with command 'dupes' (instead of 'scan') to examine")
+        print("[-] the groups of similar images inside feh.\n[-]")
 
     conn.close()
-
     print(
-        f"\nDone. inserted={inserted} updated={updated} "
-        f"skipped={skipped} removed={removed} errors={errors}"
+        f"[-] Done. "
+        f"inserted:{inserted} "
+        f"updated:{updated} "
+        f"skipped:{skipped} "
+        f"removed:{removed} "
+        f"errors:{errors}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Dupes / similarity mode
+# Similarity (dupes) mode
 # ---------------------------------------------------------------------------
 
-# pylint: disable=too-many-locals
-def find_similar_groups(conn: sqlite3.Connection, threshold: int) -> list:
+@dataclass
+class _UnionFind:
     """
-    Return a list of groups, each group being a list of full_paths that are
-    mutually within `threshold` hamming distance of at least one other member.
+    Union-Find (Disjoint Set Union) data structure.
 
-    Algorithm: BK-tree for O(n log n) nearest-neighbour lookup + union-find
-    grouping.  Results are cached in the DB and reused on re-runs.
+    Tracks connected components built from similarity edges.
+    Each element starts as its own singleton set; union() merges two sets.
+    find() returns the canonical representative (leader) of the set.
+    Path compression keeps future lookups O(α(n)) ≈ O(1).
+    """
+    elements: dict[str, str] = field(default_factory=dict)
+
+    def add(self, item: str) -> None:
+        """Register a new element as a singleton set."""
+        self.elements[item] = item
+
+    def find(self, item: str) -> str:
+        """Return the leader of item's set. Compresses the path."""
+        leader = item
+        while self.elements[leader] != leader:
+            self.elements[leader] = self.elements[self.elements[leader]]
+            leader = self.elements[leader]
+        return leader
+
+    def union(self, a: str, b: str) -> None:
+        """Merge the sets containing elements a and b."""
+        leader_a = self.find(a)
+        leader_b = self.find(b)
+        if leader_a != leader_b:
+            self.elements[leader_a] = leader_b
+
+
+def find_similar_groups(  # pylint: disable=too-many-locals
+    conn:      sqlite3.Connection,
+    threshold: int,
+) -> SimilarityGroups:
+    """
+    Return a list of similarity groups, each group being a list of file paths
+    where every pair of images in the group is within `threshold` hamming
+    distance of at least one other member.
+
+    Algorithm: BK-tree for O(n log n) nearest-neighbour lookup + Union-Find
+    grouping to build connected components from the similarity graph.
+    Results are cached in the DB and reused on subsequent runs.
     """
 
     rows = conn.execute(
         "SELECT full_path, phash FROM images WHERE phash IS NOT NULL"
     ).fetchall()
 
-    # Pre-convert hex strings to imagehash objects once
-    hashes = []  # type: List[Tuple[imagehash.ImageHash, str]]
-    for r in rows:
+    # Pre-decode hex phash strings into imagehash.ImageHash objects once
+    hash_and_path_list: list[tuple[imagehash.ImageHash, str]] = []
+    for row in rows:
         try:
-            hashes.append((imagehash.hex_to_hash(r["phash"]), r["full_path"]))
+            img_hash = imagehash.hex_to_hash(row["phash"])
+            hash_and_path_list.append((img_hash, row["full_path"]))
         except Exception:  # pylint: disable=broad-exception-caught
             pass
 
-    n = len(hashes)
-    print(f"Building BK-tree over {n} images (threshold={threshold}) ...")
+    n = len(hash_and_path_list)
+    print(f"[-] Building BK-tree over {n} images (threshold={threshold}) ...")
 
-    def bk_distance(a, b):
-        return a[0] - b[0]   # imagehash subtraction = hamming distance
+    def hamming_distance(a: tuple[imagehash.ImageHash, str],
+                         b: tuple[imagehash.ImageHash, str]) -> int:
+        """BK-tree distance: imagehash subtraction = hamming distance."""
+        return a[0] - b[0]
 
-    tree = pybktree.BKTree(bk_distance, hashes)
+    tree = pybktree.BKTree(hamming_distance, hash_and_path_list)
 
-    # Union-Find
-    parent: dict[str, str] = {path: path for _, path in hashes}
+    # Union-Find: start with every image in its own singleton set
+    uf = _UnionFind()
+    for _, img_path in hash_and_path_list:
+        uf.add(img_path)
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
+    # For each image, find all neighbours within the hamming threshold
+    # and union them into the same component.
+    for img_hash, img_path in tqdm(
+            hash_and_path_list, desc="[-] Hamming-distance lookup", unit="img"):
+        # We dont care about the actual distance (first in the returned
+        # tuple (here: _), nor do we care about the matched hash (__).
+        # We only care about the matched path (i.e the similar image)
+        for _, (__, matched_path) in tree.find(
+                (img_hash, img_path), threshold):
+            if matched_path != img_path:
+                uf.union(img_path, matched_path)
 
-    def union(x, y):
-        px, py = find(x), find(y)
-        if px != py:
-            parent[px] = py
+    # Collect connected image groups
+    image_groups: dict[str, list[Path]] = {}
+    for _, img_path in hash_and_path_list:
+        leader = uf.find(img_path)
+        image_groups.setdefault(leader, []).append(Path(img_path))
 
-    iterator = tqdm(hashes, desc="Querying", unit="img")
-    for h, path in iterator:
-        # _ is dist, unused
-        # __ is mh, unused
-        for _, (__, match_path) in tree.find((h, path), threshold):
-            if match_path != path:
-                union(path, match_path)
-
-    # Collect groups
-    groups: dict[str, list[str]] = {}
-    for _, path in hashes:
-        root_key = find(path)
-        groups.setdefault(root_key, []).append(path)
-
-    # Only return groups with 2+ members, sorted largest-group first
-    result = [sorted(g) for g in groups.values() if len(g) >= 2]
-    result.sort(key=len, reverse=True)
-    return result
+    # Only return groups with 2+ members; sort largest-first
+    not_solo_groups: SimilarityGroups = [
+        sorted(paths)
+        for paths in image_groups.values()
+        if len(paths) >= 2
+    ]
+    # return largest groups first; the ones with the most duplicate images
+    not_solo_groups.sort(key=len, reverse=True)
+    return not_solo_groups
 
 
-def open_in_feh(paths: list) -> None:
+def open_in_feh(file_paths: list[Path]) -> None:
     """Write a temp filelist and invoke feh."""
     with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False) as fh:
-        fh.write("\n".join(paths) + "\n")
+        fh.write("\n".join(str(p) for p in file_paths) + "\n")
         listfile = fh.name
-
+    # I recommend you set your ~/.config/feh/keys to this:
+    #
+    # $ cat ~/.config/feh/keys
+    # delete d
+    #
+    # ...and then you just hit key 'd' and the image shown is removed.
     try:
         subprocess.run(
-            ["feh", "-f", listfile, "-d", "--action1", "rm -fv \"%f\""],
-            check=False)
+            ["feh", "-f", listfile, "-d"], check=False)
     except FileNotFoundError:
-        print("  [ERROR] 'feh' not found -- install it", file=sys.stderr)
+        print("[x] 'feh' not found -- install it", file=sys.stderr)
     finally:
         os.unlink(listfile)
 
 
 def dupes(db_path: str, threshold: int, rescan: bool) -> None:
+    """
+    Find all similarity groups in the DB and open each group in feh.
+
+    Uses the on-disk cache (auto-invalidated on image changes).
+    Skips groups where only one file still exists on disk.
+    """
     if not Path(db_path).exists():
         sys.exit(f"Database not found: {db_path}  -- run 'scan' first.")
 
     conn = open_db(db_path)
-
     cache_key = compute_cache_key(conn, threshold)
 
     if rescan:
-        print("--rescan requested, ignoring cache.")
-        groups = None
+        print("[-] --rescan requested, ignoring cache.")
+        groups: SimilarityGroups | None = None
     else:
         groups = load_cache(conn, cache_key)
 
     if groups is None:
         groups = find_similar_groups(conn, threshold)
         save_cache(conn, cache_key, threshold, groups)
-        print(f"Similarity results cached ({len(groups)} group(s)).")
+        print(f"[-] Similarity results cached ({len(groups)} group(s)).")
 
     conn.close()
 
     if not groups:
-        print("No similar images found.")
+        print("[-] No similar images found.")
         return
 
-    total = sum(len(g) for g in groups)
-    print(f"\nFound {len(groups)} similarity group(s) over {total} images.\n")
+    total_images = sum(len(g) for g in groups)
+    print(f"\n[-] Found {len(groups)} similarity group(s) covering "
+          f"{total_images} images.\n")
 
-    for idx, group in enumerate(groups, 1):
-        print(f"--- Group {idx}/{len(groups)}  ({len(group)} images) ---")
-        for p in group:
+    for group_idx, paths_in_group in enumerate(groups, 1):
+        print(f"--- Group {group_idx}/{len(groups)}  ({len(paths_in_group)} "
+              "images) ---")
+        for p in paths_in_group:
             print(f"   {p}")
 
-        # Filter to paths that still exist on disk, largest file first
-        existing = sorted(
-            (p for p in group if Path(p).exists()),
-            key=lambda p: Path(p).stat().st_size,
-            reverse=True,
-        )
-        missing = len(group) - len(existing)
-        if missing:
-            print(f"  ({missing} path(s) no longer on disk, skipping them)")
+        # Filter to paths that still exist on disk, largest first
+        still_on_disk = sorted(
+            (p for p in paths_in_group if p.exists()),
+            key=lambda p: p.stat().st_size,
+            reverse=True)
+        gone_count = len(paths_in_group) - len(still_on_disk)
+        if gone_count:
+            print(f"  ({gone_count} path(s) no longer on disk, skipping them)")
 
-        if not existing:
+        if not still_on_disk:
             print("  Skipping -- no files exist.\n")
             continue
-        if len(existing) == 1:
+        if len(still_on_disk) == 1:
             continue
 
         print("  Opening in feh ...")
-        open_in_feh(existing)
+        open_in_feh(still_on_disk)
         print()
 
 
@@ -494,42 +589,48 @@ def dupes(db_path: str, threshold: int, rescan: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level ArgumentParser with all subcommands."""
     p = argparse.ArgumentParser(
         description="Use perceptual hashing for similar image identification.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--db", default="imagescan.db", metavar="PATH",
-                   help="SQLite database path (default: imagescan.db)")
+    p.add_argument(
+        "--db", default="imagescan.db", metavar="PATH",
+        help="SQLite database path (default: imagescan.db)",
+    )
 
     sub = p.add_subparsers(dest="command", required=True)
 
     # scan
     sp = sub.add_parser("scan", help="Scan a folder tree and hash images")
     sp.add_argument("folder", help="Root folder to scan")
-    sp.add_argument("--ncores", type=int, default=None,
-                    help="Number of CPU cores for hashing (default: all)")
+    sp.add_argument(
+        "--ncores", type=int, default=None,
+        help="Number of CPU cores for hashing (default: all available)",
+    )
 
     # dupes
-    dp = sub.add_parser("dupes",
-                        help="Find similar images' groups, view groups in feh")
-    dp.add_argument("--threshold", type=int, default=10,
-                    help="Max hamming distance for similarity (default: 10)")
-    dp.add_argument("--rescan", action="store_true",
-                    help="Ignore cached similarity results and recompute")
+    dp = sub.add_parser("dupes", help="Find similar image groups, view in feh")
+    dp.add_argument(
+        "--threshold", type=int, default=10,
+        help="Max hamming distance for similarity (default: 10)",
+    )
+    dp.add_argument(
+        "--rescan", action="store_true",
+        help="Ignore cached similarity results and recompute",
+    )
 
     return p
 
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
+def main() -> None:
+    """Parse CLI args and dispatch to the appropriate subcommand."""
+    args = build_parser().parse_args()
 
     if args.command == "scan":
-        ncores = \
-            args.ncores \
-            if args.ncores and args.ncores > 0 \
-            else cpu_count()
+        ncores = args.ncores if args.ncores and args.ncores > 0 \
+                             else cpu_count()
         scan(args.folder, args.db, ncores)
     elif args.command == "dupes":
         dupes(args.db, args.threshold, args.rescan)
