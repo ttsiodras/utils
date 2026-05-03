@@ -65,11 +65,11 @@ def fast_checksum(path: Path) -> Optional[str]:
             data = f.read(FAST_HASH_BYTES)
         return hashlib.md5(data).hexdigest()
     except OSError as e:
-        log.debug("Checksum failed for %s: %s", path, e)
+        print("\n[!] Checksum failed for %s: %s", path, e)
         return None
 
 
-def run_ffprobe(filepath: Path) -> Tuple[Path, Optional[float]]:
+def run_ffprobe(filepath: Path) -> Optional[float]:
     """Probe a video file to extract its duration using ``ffprobe``.
 
     Args:
@@ -107,17 +107,15 @@ def run_ffprobe(filepath: Path) -> Tuple[Path, Optional[float]]:
         check=False,
     )
     if result.returncode != 0:
-        log.debug("ffprobe error for %s: %s", filepath, result.stderr.strip())
-        return filepath, None
+        print("\n[!] ffprobe error for %s: %s", filepath,
+              result.stderr.strip())
+        return None
     try:
-        return filepath, float(result.stdout.strip())
+        return float(result.stdout.strip())
     except ValueError:
-        log.debug(
-            "Unable to parse duration for %s: %r",
-            filepath,
-            result.stdout,
-        )
-        return filepath, None
+        print("\n[!] Unable to parse duration for %s: %r",
+              filepath, result.stdout)
+        return None
 
 
 def extract_frame(video: Path, timestamp: float, out_path: Path) -> bool:
@@ -225,6 +223,9 @@ def compute_phash(video: Path, duration: float) -> Optional[str]:
                         return str(imagehash.phash(img))
                 finally:
                     pass
+    print(f"\n[!] Failed to compute perceptual hash for\n[!]\n[!]\t"
+          f"{video}\n[!]\n[!] I/O error, decoding error, or all frames up"
+          f"to MAX_OFFSET_SECONDS ({MAX_OFFSET_SECONDS}) are black.\n[!]")
     return None
 
 
@@ -304,7 +305,7 @@ def collect_files(root: Path) -> List[Tuple[Path, int, float]]:
         except OSError:
             continue
         # progress update
-        sys.stdout.write(f"\rCollecting files: {len(files)} found")
+        sys.stdout.write(f"\r[-] Collecting files: {len(files)} found")
         sys.stdout.flush()
     sys.stdout.write("\n")
     return files
@@ -354,7 +355,7 @@ def parallel_ffprobe(
         - Parallel processing for I/O bound ffprobe operations
 
     Progress:
-        Displays "Probing files: N/M" during execution.
+        Displays "Reading video metadata: N/M" during execution.
     """
     # Load cached metadata from the DB
     cached = {
@@ -385,10 +386,11 @@ def parallel_ffprobe(
         }
         for fut in as_completed(futures):
             processed += 1
-            sys.stdout.write(f"\rProbing files: {processed}/{total}")
+            sys.stdout.write(
+                f"\r[-] Reading video metadata: {processed}/{total}")
             sys.stdout.flush()
             path, size, mtime, checksum = futures[fut]
-            _, duration = fut.result()
+            duration = fut.result()
             if duration is not None:
                 conn.execute(
                     """
@@ -425,6 +427,7 @@ def find_candidates(
     Complexity:
         O(n²) where n is the number of videos in the database.
     """
+    print("[-] Computing candidate videos based on durations...")
     rows = conn.execute("SELECT path, duration FROM videos").fetchall()
     return [
         (Path(p1), d1, Path(p2), d2)
@@ -454,7 +457,7 @@ def compute_hashes(
         3. Store results in database as they complete
 
     Progress:
-        Displays "Hashing videos: N/M" during execution.
+        Displays "Perceptual-hashing candidate videos: N/M" during execution.
 
     Note:
         Uses dict mapping to ensure correct path-hash pairing despite
@@ -480,7 +483,9 @@ def compute_hashes(
         }
         for fut in as_completed(futures):
             processed += 1
-            sys.stdout.write(f"\rHashing videos: {processed}/{total}")
+            sys.stdout.write(
+                "\r[-] Perceptual-hashing candidate videos: "
+                f"{processed}/{total}")
             sys.stdout.flush()
             p, _ = futures[fut]
             phash = fut.result()
@@ -574,9 +579,6 @@ def main() -> None:
         /home/user/videos/movie1.mp4\n\t/home/user/videos/movie1_copy.mp4
         /home/user/videos/clip.mp4\n\t/home/user/videos/clip_renders.mp4
     """
-    if len(sys.argv) != 2:
-        sys.stderr.write("Usage: find_dup_videos_refactored.py <folder>\n")
-        sys.exit(1)
 
     def parse_args():
         parser = argparse.ArgumentParser(
@@ -614,7 +616,6 @@ def main() -> None:
         for p1, p2 in matches:
             print(f"\n{p1}\n\t{p2}")
     finally:
-        # Ensure terminal is left in a clean state
         sys.stdout.write("\n")
         sys.stdout.flush()
 
