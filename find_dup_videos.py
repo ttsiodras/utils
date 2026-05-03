@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 Detect duplicate videos in a directory based on duration and perceptual hash.
+Uses ffmpeg and ffprobe.
 
 Quickstart:
 
+    # Use your package manager to install the ffmpeg suite.
+    # Then...
     python3 -m venv .venv
     . .venv/bin/activate
     python3 -m pip install ImageHash pillow
