@@ -295,12 +295,27 @@ def collect_files(root: Path) -> List[Tuple[Path, int, float]]:
     Progress:
         Displays "Collecting files: N found" during scanning.
     """
+
+    VIDEO_EXTENSIONS = {
+        "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv",
+        "f4v", "f4p", "f4a", "f4b", "3gp", "3g2", "mpg", "mpeg",
+        "mpe", "mpv", "m2v", "mts", "m2ts", "ts", "vob", "ogv",
+        "ogg", "rm", "rmvb", "asf", "amv", "divx", "xvid", "dv",
+        "dat", "nsv", "yuv", "h264", "h265", "hevc", "vp8", "vp9",
+        "av1", "mxf", "roq", "bik", "smk", "drc", "gifv", "wtv",
+        "dvr-ms", "viv", "pva", "evo", "264", "265",
+    }
+
     files: List[Tuple[Path, int, float]] = []
     processed = 0
     for p in root.rglob("*"):
         processed += 1
         if not p.is_file() or p.is_symlink():
             continue
+
+        if p.suffix.lower().lstrip(".") not in VIDEO_EXTENSIONS:
+            continue
+
         # Simple heuristics to ignore library folders
         # or known non-video files
         if "/library/" in str(p) or "audio.HEVC.mp4" in str(p):
