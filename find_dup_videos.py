@@ -6,6 +6,7 @@ Detect duplicate videos in a directory based on duration and perceptual hash.
 
 import os
 import sys
+import argparse
 import sqlite3
 import subprocess
 import hashlib
@@ -34,10 +35,9 @@ MAX_OFFSET_SECONDS = 60
 CPU_COUNT = os.cpu_count() or 1
 
 # ----------------------------------------------------------------------
-# Logging setup
+# Verbose mode
 # ----------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger(__name__)
+g_verbose = False
 
 # ----------------------------------------------------------------------
 # Helper utilities
@@ -208,6 +208,8 @@ def compute_phash(video: Path, duration: float) -> Optional[str]:
         >>> compute_phash(Path("video.mp4"), 31.4159)
         'd3adc0de0badbeef'
     """
+    if g_verbose:
+        (f"\n[-] Computing hash for {video}")
     with tempfile.TemporaryDirectory() as td:
         frame_path = Path(td) / "frame.jpg"
         base_ts = duration * 0.1
@@ -576,7 +578,21 @@ def main() -> None:
         sys.stderr.write("Usage: find_dup_videos_refactored.py <folder>\n")
         sys.exit(1)
 
-    folder = Path(sys.argv[1]).resolve()
+    def parse_args():
+        parser = argparse.ArgumentParser(
+            description="Find duplicate videos"
+        )
+        parser.add_argument("folder", help="Folder to scan")
+        parser.add_argument("-v", "--verbose", action="store_true",
+                            help="Enable verbose output")
+        return parser.parse_args()
+
+    args = parse_args()
+
+    global g_verbose
+    g_verbose = args.verbose
+
+    folder = Path(args.folder).resolve()
     if not folder.is_dir():
         sys.stderr.write(f"Error: {folder} is not a directory\n")
         sys.exit(1)
