@@ -101,6 +101,7 @@ def run_ffprobe(filepath: Path) -> Optional[float]:
     ]
     result = subprocess.run(
         cmd,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -137,6 +138,8 @@ def extract_frame(video: Path, timestamp: float, out_path: Path) -> bool:
     """
     cmd = [
         "ffmpeg", "-y",
+        "-nostdin",
+        "-loglevel", "error",  # or "quiet"
         "-ss", f"{timestamp}",
         "-i", str(video),
         "-frames:v", "1",
@@ -145,7 +148,11 @@ def extract_frame(video: Path, timestamp: float, out_path: Path) -> bool:
         str(out_path),
     ]
     result = subprocess.run(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
     )
     return result.returncode == 0
 
