@@ -10,7 +10,6 @@ Quickstart:
     /path/to/find_dup_videos.py /path/to/videos/
 
 """
-# pylint: disable=import-error
 
 import os
 import sys
@@ -24,10 +23,8 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import combinations
 from typing import List, Dict, Optional, NamedTuple
-import imagehash  # type: ignore
-# pylint: disable=import-error
-from PIL import Image, ImageStat  # type: ignore
-# pylint: disable=import-error
+import imagehash
+from PIL import Image, ImageStat
 
 
 # ----------------------------------------------------------------------
