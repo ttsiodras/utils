@@ -31,7 +31,7 @@ DURATION_TOLERANCE = 3.0          # seconds
 HASH_DISTANCE_TOLERANCE = 10
 BLACK_PIXEL_THRESHOLD = 10
 FAST_HASH_BYTES = 1 * 1024 * 1024
-MAX_OFFSET_SECONDS = 60
+MAX_OFFSET_SECONDS = 10
 CPU_COUNT = os.cpu_count() or 1
 
 # ----------------------------------------------------------------------
@@ -181,8 +181,8 @@ def is_black_image(image_path: Path) -> bool:
 def compute_phash(video: Path, duration: float) -> Optional[str]:
     """Compute a perceptual hash (phash) for a video file.
 
-    Extracts frames starting at ``duration * 0.1`` (10% into the video) and
-    iterates with 1-second offsets up to ``MAX_OFFSET_SECONDS`` (60s). Returns
+    Extracts frames starting at ``duration * 0.2`` (20% into the video) and
+    iterates with 1-second offsets up to ``MAX_OFFSET_SECONDS`` (10s). Returns
     the phash of the first non-black frame found.
 
     Perceptual hashes allow comparison of visual similarity between videos
@@ -198,7 +198,7 @@ def compute_phash(video: Path, duration: float) -> Optional[str]:
         or ``None`` if no suitable frame was found.
 
     Algorithm:
-        1. Start at timestamp = duration * 0.1
+        1. Start at timestamp = duration * 0.2
         2. Extract frame and check if it's black (luminance < 10)
         3. If not black, compute and return phash
         4. If black, try next offset (timestamp + 1 second)
@@ -212,7 +212,7 @@ def compute_phash(video: Path, duration: float) -> Optional[str]:
         (f"\n[-] Computing hash for {video}")
     with tempfile.TemporaryDirectory() as td:
         frame_path = Path(td) / "frame.jpg"
-        base_ts = duration * 0.1
+        base_ts = duration * 0.2
         for offset in range(min(int(duration), MAX_OFFSET_SECONDS)):
             ts = base_ts + offset
             if ts >= duration:
