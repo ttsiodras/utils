@@ -29,6 +29,7 @@ Filesystem options:
                 Everything else in $HOME is readable but read-only.
                 /tmp is always private and empty.
   --hide PATH   Make PATH completely invisible. Repeatable.
+  --host-dev    Expose the host /dev instead of a minimal private /dev.
 
 Network options:
   --servers FILE        Allow loopback + only the listed IPs/CIDRs/hostnames.
@@ -140,10 +141,23 @@ resolve_hostname() {
     local host="$1" out ip
     local -a addrs=()
     if out="$(getent ahostsv4 "$host" 2>/dev/null)"; then
-        while read -r ip _; do [[ -n "${ip:-}" ]] && addrs+=("$ip"); done <<< "$out"
+        while read -r ip _; do
+            [[ -n "${ip:-}" ]] || continue
+            # getent ahostsv4 on IPv6-enabled glibc returns IPv4-mapped form
+            # (::ffff:A.B.C.D). Strip the prefix so it's a plain IPv4 literal.
+            ip="${ip#::ffff:}"
+            ip="${ip#::FFFF:}"
+            addrs+=("$ip")
+        done <<< "$out"
     fi
     if out="$(getent ahostsv6 "$host" 2>/dev/null)"; then
-        while read -r ip _; do [[ -n "${ip:-}" ]] && addrs+=("$ip"); done <<< "$out"
+        while read -r ip _; do
+            [[ -n "${ip:-}" ]] || continue
+            # Skip mapped-IPv4 entries from the v6 lookup; the v4 pass above
+            # already produced their plain-IPv4 form.
+            [[ "$ip" == ::ffff:*.*.*.* || "$ip" == ::FFFF:*.*.*.* ]] && continue
+            addrs+=("$ip")
+        done <<< "$out"
     fi
     [[ ${#addrs[@]} -gt 0 ]] || die "failed to resolve hostname: $host"
     printf '%s\n' "${addrs[@]}" | awk '!seen[$0]++'
@@ -180,13 +194,14 @@ parse_server_line() {
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-SERVERS_FILE="" IFACE="" DNS_CSV=""
-RW_PATHS=() HIDE_PATHS=()
+IFACE="" DNS_CSV=""
+PRIVATE_DEV=1
+SERVERS_FILES=() RW_PATHS=() HIDE_PATHS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --servers)   [[ $# -ge 2 ]] || usage; SERVERS_FILE="$2"; shift 2 ;;
-        --servers=*) SERVERS_FILE="${1#*=}"; shift ;;
+        --servers)   [[ $# -ge 2 ]] || usage; SERVERS_FILES+=("$2"); shift 2 ;;
+        --servers=*) SERVERS_FILES+=("${1#*=}"); shift ;;
         --iface)     [[ $# -ge 2 ]] || usage; IFACE="$2"; shift 2 ;;
         --iface=*)   IFACE="${1#*=}"; shift ;;
         --dns)       [[ $# -ge 2 ]] || usage; DNS_CSV="$2"; shift 2 ;;
@@ -195,6 +210,7 @@ while [[ $# -gt 0 ]]; do
         --rw=*)      RW_PATHS+=("${1#*=}"); shift ;;
         --hide)      [[ $# -ge 2 ]] || usage; HIDE_PATHS+=("$2"); shift 2 ;;
         --hide=*)    HIDE_PATHS+=("${1#*=}"); shift ;;
+        --host-dev)  PRIVATE_DEV=0; shift ;;
         --help|-h)   usage ;;
         --)          shift; break ;;
         -*)          die "unknown option: $1" ;;
@@ -252,15 +268,17 @@ NFT6="$WORKDIR/allowlist6.net"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 
-# Slurp process substitutions (e.g. --servers <(echo 1.1.1.1)) into a real
-# file immediately, while the fd is still open in the parent shell.
-if [[ -n "$SERVERS_FILE" ]]; then
-    [[ -r "$SERVERS_FILE" ]] || die "cannot read servers file: $SERVERS_FILE"
-    case "$SERVERS_FILE" in
-        /dev/fd/*|/proc/self/fd/*|/proc/"$$"/fd/*)
-            cat "$SERVERS_FILE" > "$WORKDIR/servers.txt"
-            SERVERS_FILE="$WORKDIR/servers.txt" ;;
-    esac
+# Concatenate all --servers files (slurping any process substitutions while
+# their fds are still open in the parent shell) into a single file.
+SERVERS_FILE=""
+if (( ${#SERVERS_FILES[@]} > 0 )); then
+    SERVERS_FILE="$WORKDIR/servers.txt"
+    : > "$SERVERS_FILE"
+    for f in "${SERVERS_FILES[@]}"; do
+        [[ -r "$f" ]] || die "cannot read servers file: $f"
+        cat "$f" >> "$SERVERS_FILE"
+        printf '\n' >> "$SERVERS_FILE"
+    done
 fi
 
 # ---------------------------------------------------------------------------
@@ -277,11 +295,8 @@ fi
 
 REAL_HOME="$(realpath "$HOME")"
 
-FJ_FS_ARGS=(
-    --private-dev
-    --private-tmp
-    --read-only="$REAL_HOME"
-)
+FJ_FS_ARGS=(--private-tmp --read-only="$REAL_HOME")
+(( PRIVATE_DEV )) && FJ_FS_ARGS=(--private-dev "${FJ_FS_ARGS[@]}")
 
 for p in "${RW_PATHS[@]+"${RW_PATHS[@]}"}"; do
     p="$(realpath -m "$p")"
