@@ -9,6 +9,16 @@
 #     symlink somewhere else), also add --rw on the symlink's own directory
 #   - If the argument is a directory, add --rw on the directory itself
 #   - Duplicate paths are collapsed
+#
+# Typical setup for a launcher of this:
+#
+# $ export PATH=$HOME/bin.local:$PATH
+# $ cat ~/bin.local/vim
+#
+# #!/bin/bash
+# export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:/usr/local/packages/vim-9.1.0113/bin:$PATH"
+# vimisolated.sh --host-dev --servers=<(echo internal.company.server) "$@"
+
 
 export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:$PATH"
 
@@ -20,6 +30,10 @@ VIM_ARGS=()
 # Split: consume known isolate.sh flags, pass everything else to vim.
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --host-dev)
+            ISO_ARGS+=("$1")
+            shift
+            ;;
         --rw|--hide|--servers|--iface|--dns)
             [[ $# -ge 2 ]] || { echo "vim-launcher: $1 requires an argument" >&2; exit 1; }
             ISO_ARGS+=("$1" "$2")
@@ -109,4 +123,19 @@ for arg in "${VIM_ARGS[@]+"${VIM_ARGS[@]}"}"; do
     fi
 done
 
-exec "$ISOLATE" "${ISO_ARGS[@]}" -- /usr/bin/vim "${VIM_ARGS[@]+"${VIM_ARGS[@]}"}"
+# Pick the next `vim` on PATH that isn't this script (so a symlink named
+# `vim` pointing here doesn't cause infinite recursion).
+SELF="$(realpath "$0")"
+REAL_VIM=""
+IFS=':' read -r -a _path_dirs <<< "$PATH"
+for d in "${_path_dirs[@]}"; do
+    [[ -z "$d" ]] && continue
+    cand="$d/vim"
+    [[ -x "$cand" ]] || continue
+    [[ "$(realpath "$cand")" == "$SELF" ]] && continue
+    REAL_VIM="$cand"
+    break
+done
+[[ -n "$REAL_VIM" ]] || { echo "vim-launcher: no real vim found on PATH" >&2; exit 1; }
+
+exec "$ISOLATE" "${ISO_ARGS[@]}" -- "$REAL_VIM" "${VIM_ARGS[@]+"${VIM_ARGS[@]}"}"
