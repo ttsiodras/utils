@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+import sys
+
+s = sys.stdin.read()
+
+indent = 0
+buf = []
+line = []
+paren = 0
+
+def emit(extra_indent=0):
+    global line
+    text = ''.join(line).strip()
+    if text:
+        buf.append('  ' * max(0, indent + extra_indent) + text)
+    line = []
+
+i = 0
+while i < len(s):
+    ch = s[i]
+
+    if ch == '(':
+        paren += 1
+        line.append(ch)
+
+    elif ch == ')':
+        paren = max(0, paren - 1)
+        line.append(ch)
+
+    elif ch == '<' and paren == 0:
+        # avoid breaking operator< in most backtrace/type contexts is hard;
+        # this is intended for template-heavy demangled names.
+        emit()
+        buf.append('  ' * indent + '<')
+        indent += 1
+
+    elif ch == '>' and paren == 0:
+        emit()
+        indent = max(0, indent - 1)
+        buf.append('  ' * indent + '>')
+
+    elif ch == ',' and paren == 0:
+        line.append(',')
+        emit()
+
+    elif ch == '\n':
+        emit()
+        buf.append('')
+
+    else:
+        line.append(ch)
+
+    i += 1
+
+emit()
+
+print('\n'.join(buf))
