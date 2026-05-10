@@ -34,9 +34,6 @@ Options:
 from __future__ import annotations
 
 import argparse
-import datetime
-import hashlib
-import json
 import os
 import sqlite3
 import subprocess
@@ -128,12 +125,14 @@ CREATE TABLE IF NOT EXISTS images (
 );
 CREATE INDEX IF NOT EXISTS idx_phash ON images (phash);
 
-CREATE TABLE IF NOT EXISTS similarity_cache (
-    cache_key   TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS similarity_edges (
+    path_a      TEXT NOT NULL,
+    path_b      TEXT NOT NULL,
     threshold   INTEGER NOT NULL,
-    computed_at TEXT    NOT NULL,
-    groups_json TEXT    NOT NULL
+    PRIMARY KEY (path_a, path_b)
 );
+CREATE INDEX IF NOT EXISTS idx_edges_a ON similarity_edges (path_a);
+CREATE INDEX IF NOT EXISTS idx_edges_b ON similarity_edges (path_b);
 """
 
 
@@ -144,63 +143,6 @@ def open_db(db_path: str) -> sqlite3.Connection:
     conn.commit()
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def compute_cache_key(conn: sqlite3.Connection, threshold: int) -> str:
-    """
-    Stable hash over (sorted list of all phashes in the DB, threshold).
-    Any change to the image set or threshold produces a different key,
-    which invalidates the cache automatically.
-    """
-    phashes = [
-        row["phash"]
-        for row in conn.execute(
-            "SELECT phash FROM images WHERE phash IS NOT NULL ORDER BY phash")
-    ]
-    return hashlib.sha256(
-        json.dumps(phashes + [threshold]).encode()).hexdigest()
-
-
-def load_cache(
-    conn: sqlite3.Connection, cache_key: str
-) -> SimilarityGroups | None:
-    """Return cached groups if the key matches, else None."""
-    row = conn.execute(
-        "SELECT groups_json, computed_at "
-        "FROM similarity_cache WHERE cache_key = ?",
-        (cache_key,),
-    ).fetchone()
-    if row:
-        print("[-] Using cached similarity results "
-              f"(computed_at {row['computed_at']}).")
-        str_groups: list[list[str]] = json.loads(row["groups_json"])
-        return [[Path(p) for p in g] for g in str_groups]
-    return None
-
-
-def save_cache(
-    conn:        sqlite3.Connection,
-    cache_key:   str,
-    threshold:   int,
-    groups:      SimilarityGroups,
-) -> None:
-    """Persist groups to the cache, replacing any previous entry."""
-    conn.execute("DELETE FROM similarity_cache")
-    # Convert Path back to str for JSON serialization
-    serializable_groups: list[list[str]] = [
-        [str(p) for p in g] for g in groups
-    ]
-    conn.execute(
-        """INSERT INTO similarity_cache
-              (cache_key, threshold, computed_at, groups_json)
-           VALUES (?, ?, ?, ?)""",
-        (
-            cache_key,
-            threshold,
-            datetime.datetime.now().isoformat(timespec="seconds"),
-            json.dumps(serializable_groups)),
-    )
-    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +173,13 @@ def compute_record(file_path: Path) -> ImageRecord | None:
 # ---------------------------------------------------------------------------
 
 # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-def scan(folder: str, db_path: str, ncores: int) -> None:
+def scan(folder: str, db_path: str, ncores: int, threshold: int = 10) -> None:
     """
     Recursively scan `folder`, hash every image, and upsert records in DB.
 
     Skips unchanged files (size+mtime match the DB entry); idempotent re-runs.
     Removes DB entries for files that no longer exist on disk.
-    Invalidates the similarity cache whenever the image set changes.
+    Updates similarity edges incrementally.
     """
     root = Path(folder).resolve()
     if not root.is_dir():
@@ -322,6 +264,9 @@ def scan(folder: str, db_path: str, ncores: int) -> None:
             if rec:
                 records[rec.file_path] = rec
 
+    # Tracking changes for incremental similarity updates
+    changed_paths: set[str] = set()
+
     # Write results to DB
     for file_path in sorted(scanned_paths):
         existing_row = indexed.get(file_path)
@@ -352,6 +297,7 @@ def scan(folder: str, db_path: str, ncores: int) -> None:
                 },
             )
             updated += 1
+            changed_paths.add(str(img_record.file_path))
             print(f"[-] Updated: {file_path}")
         else:
             conn.execute(
@@ -365,25 +311,80 @@ def scan(folder: str, db_path: str, ncores: int) -> None:
                 },
             )
             inserted += 1
+            changed_paths.add(str(img_record.file_path))
             print(f"[-] Inserted: {file_path}")
 
     # Prune paths that disappeared from disk
+    removed_paths: set[str] = set()
     for file_path in indexed:
         if file_path.startswith(str(root)) and file_path not in scanned_paths:
             conn.execute(
                 "DELETE FROM images WHERE full_path = ?", (file_path,))
             removed += 1
+            removed_paths.add(file_path)
             print(f"[-] Removed: {file_path}")
 
     conn.commit()
 
-    # Any structural change to the image table invalidates similarity cache
-    if inserted or updated or removed:
-        conn.execute("DELETE FROM similarity_cache")
+    # Incremental Similarity Update
+    if changed_paths or removed_paths:
+        print(f"[-] Updating similarity edges incrementally...")
+        # 1. Remove edges for removed or updated images
+        all_changed = changed_paths | removed_paths
+        if all_changed:
+            placeholder = ",".join(["?"] * len(all_changed))
+            query = (
+                f"DELETE FROM similarity_edges "
+                f"WHERE path_a IN ({placeholder}) OR path_b IN ({placeholder})"
+            )
+            conn.execute(query, list(all_changed) + list(all_changed))
+        
+        # 2. Build a temporary BK-tree of all current images to find new edges
+        all_images = conn.execute("SELECT full_path, phash FROM images").fetchall()
+        if not all_images:
+            conn.commit()
+            return
+
+        hash_and_path_list = []
+        for row in all_images:
+            try:
+                hash_and_path_list.append(
+                    (imagehash.hex_to_hash(row["phash"]), row["full_path"])
+                )
+            except Exception:
+                continue
+        
+        def hamming_distance(a, b):
+            """Distance function for BK-tree."""
+            return a[0] - b[0]
+            
+        tree = pybktree.BKTree(hamming_distance, hash_and_path_list)
+        
+        # 3. Only check distances for the images that actually changed
+        changed_rows = conn.execute(
+            "SELECT phash, full_path FROM images WHERE full_path IN (" +
+            ",".join(["?"] * len(changed_paths)) + ")",
+            list(changed_paths)
+        )
+        
+        for row in tqdm(
+            changed_rows, desc="[-] Computing new similarity edges", unit="img"
+        ):
+            img_hash = imagehash.hex_to_hash(row["phash"])
+            img_path = row["full_path"]
+            
+            for _, (__, matched_path) in tree.find((img_hash, img_path), threshold):
+                if matched_path != img_path:
+                    # Store edges symmetrically or consistently (sorted)
+                    edge = tuple(sorted([img_path, matched_path]))
+                    conn.execute(
+                        "INSERT OR IGNORE INTO similarity_edges "
+                        "(path_a, path_b, threshold) VALUES (?, ?, ?)",
+                        (edge[0], edge[1], threshold)
+                    )
+        
         conn.commit()
-        print("[-]\n[-] Similarity cache invalidated.")
-        print("[-] Re-run with command 'dupes' (instead of 'scan') to examine")
-        print("[-] the groups of similar images inside feh.\n[-]")
+        print("[-] Similarity edges updated.")
 
     conn.close()
     print(
@@ -432,73 +433,89 @@ class _UnionFind:
             self.elements[leader_a] = leader_b
 
 
-def find_similar_groups(  # pylint: disable=too-many-locals
+def find_similar_groups(
     conn:      sqlite3.Connection,
     threshold: int,
 ) -> SimilarityGroups:
     """
-    Return a list of similarity groups, each group being a list of file paths
-    where every pair of images in the group is within `threshold` hamming
-    distance of at least one other member.
-
-    Algorithm: BK-tree for O(n log n) nearest-neighbour lookup + Union-Find
-    grouping to build connected components from the similarity graph.
-    Results are cached in the DB and reused on subsequent runs.
+    Return a list of similarity groups.
+    
+    Algorithm:
+    1. Load all cached similarity edges for the given threshold.
+    2. If no edges exist, compute them using a BK-tree.
+    3. Use Union-Find to build connected components from the edges.
     """
-
-    rows = conn.execute(
-        "SELECT full_path, phash FROM images WHERE phash IS NOT NULL"
+    # Load existing edges for this threshold
+    edges = conn.execute(
+        "SELECT path_a, path_b FROM similarity_edges WHERE threshold = ?",
+        (threshold,)
     ).fetchall()
 
-    # Pre-decode hex phash strings into imagehash.ImageHash objects once
-    hash_and_path_list: list[tuple[imagehash.ImageHash, str]] = []
-    for row in rows:
-        try:
-            img_hash = imagehash.hex_to_hash(row["phash"])
-            hash_and_path_list.append((img_hash, row["full_path"]))
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
+    if not edges:
+        print(f"[-] No cached edges found for threshold {threshold}. Computing...")
+        # Full computation
+        rows = conn.execute(
+            "SELECT full_path, phash FROM images WHERE phash IS NOT NULL"
+        ).fetchall()
 
-    n = len(hash_and_path_list)
-    print(f"[-] Building BK-tree over {n} images (threshold={threshold}) ...")
+        hash_and_path_list: list[tuple[imagehash.ImageHash, str]] = []
+        for row in rows:
+            try:
+                hash_and_path_list.append(
+                    (imagehash.hex_to_hash(row["phash"]), row["full_path"])
+                )
+            except Exception:
+                pass
 
-    def hamming_distance(a: tuple[imagehash.ImageHash, str],
-                         b: tuple[imagehash.ImageHash, str]) -> int:
-        """BK-tree distance: imagehash subtraction = hamming distance."""
-        return a[0] - b[0]
+        if not hash_and_path_list:
+            return []
 
-    tree = pybktree.BKTree(hamming_distance, hash_and_path_list)
+        def hamming_distance(a, b):
+            """Distance function for BK-tree."""
+            return a[0] - b[0]
 
-    # Union-Find: start with every image in its own singleton set
+        tree = pybktree.BKTree(hamming_distance, hash_and_path_list)
+        
+        # Compute all pairs and save them
+        for img_hash, img_path in tqdm(
+                hash_and_path_list, desc="[-] Computing all similarity edges",
+                unit="img"):
+            for _, (__, matched_path) in tree.find((img_hash, img_path), threshold):
+                if matched_path != img_path:
+                    edge = tuple(sorted([img_path, matched_path]))
+                    conn.execute(
+                        "INSERT OR IGNORE INTO similarity_edges "
+                        "(path_a, path_b, threshold) VALUES (?, ?, ?)",
+                        (edge[0], edge[1], threshold)
+                    )
+        conn.commit()
+        
+        # Refresh edges from DB
+        edges = conn.execute(
+            "SELECT path_a, path_b FROM similarity_edges WHERE threshold = ?",
+            (threshold,)
+        ).fetchall()
+
+    # Union-Find: group images based on edges
     uf = _UnionFind()
-    for _, img_path in hash_and_path_list:
-        uf.add(img_path)
+    all_paths = set()
+    for path_a, path_b in edges:
+        uf.add(path_a)
+        uf.add(path_b)
+        uf.union(path_a, path_b)
+        all_paths.add(path_a)
+        all_paths.add(path_b)
 
-    # For each image, find all neighbours within the hamming threshold
-    # and union them into the same component.
-    for img_hash, img_path in tqdm(
-            hash_and_path_list, desc="[-] Hamming-distance lookup", unit="img"):
-        # We dont care about the actual distance (first in the returned
-        # tuple (here: _), nor do we care about the matched hash (__).
-        # We only care about the matched path (i.e the similar image)
-        for _, (__, matched_path) in tree.find(
-                (img_hash, img_path), threshold):
-            if matched_path != img_path:
-                uf.union(img_path, matched_path)
-
-    # Collect connected image groups
     image_groups: dict[str, list[Path]] = {}
-    for _, img_path in hash_and_path_list:
-        leader = uf.find(img_path)
-        image_groups.setdefault(leader, []).append(Path(img_path))
+    for path in all_paths:
+        leader = uf.find(path)
+        image_groups.setdefault(leader, []).append(Path(path))
 
-    # Only return groups with 2+ members; sort largest-first
     not_solo_groups: SimilarityGroups = [
         sorted(paths)
         for paths in image_groups.values()
         if len(paths) >= 2
     ]
-    # return largest groups first; the ones with the most duplicate images
     not_solo_groups.sort(key=len, reverse=True)
     return not_solo_groups
 
@@ -528,26 +545,20 @@ def dupes(db_path: str, threshold: int, rescan: bool) -> None:
     """
     Find all similarity groups in the DB and open each group in feh.
 
-    Uses the on-disk cache (auto-invalidated on image changes).
+    Uses the on-disk similarity edges cache.
     Skips groups where only one file still exists on disk.
     """
     if not Path(db_path).exists():
         sys.exit(f"Database not found: {db_path}  -- run 'scan' first.")
 
     conn = open_db(db_path)
-    cache_key = compute_cache_key(conn, threshold)
 
     if rescan:
-        print("[-] --rescan requested, ignoring cache.")
-        groups: SimilarityGroups | None = None
-    else:
-        groups = load_cache(conn, cache_key)
+        print("[-] --rescan requested, clearing similarity edges.")
+        conn.execute("DELETE FROM similarity_edges WHERE threshold = ?", (threshold,))
+        conn.commit()
 
-    if groups is None:
-        groups = find_similar_groups(conn, threshold)
-        save_cache(conn, cache_key, threshold, groups)
-        print(f"[-] Similarity results cached ({len(groups)} group(s)).")
-
+    groups = find_similar_groups(conn, threshold)
     conn.close()
 
     if not groups:
