@@ -69,6 +69,7 @@ OEF
 docker run --network=restricted_net \
   -w "$PWD" \
   --rm \
+  $@ \
   -v "$PWD:$PWD" \
   -v "$TMPDIR_PI/pi.AGENTS.md":"/home/$(id -un)/.pi/agent/AGENTS.md:ro" \
   -v "$TMPDIR_PI/models.json":"/home/$(id -un)/.pi/agent/models.json:ro" \
