@@ -67,12 +67,35 @@ add_rw() {
 
 # Find git root starting from a given directory and walk up.
 # If a .git folder is found, add its parent directory to R/W list.
+# If .git is a file (git worktree), also add the main repo's .git directory
+# (the one containing worktrees/<name>/) so GitGutter etc. can write index/HEAD.
 add_rw_git_root() {
     local start="$1"
     local current="$start"
     while [[ "$current" != "/" ]]; do
         if [[ -d "$current/.git" ]]; then
             add_rw "$current"
+            return 0
+        elif [[ -f "$current/.git" ]]; then
+            add_rw "$current"
+            # Parse "gitdir: <path>" to locate the main repo's git dir.
+            local gitdir_line gitdir main_gitdir
+            gitdir_line="$(head -n1 "$current/.git")"
+            if [[ "$gitdir_line" == gitdir:* ]]; then
+                gitdir="${gitdir_line#gitdir:}"
+                gitdir="${gitdir# }"
+                # Resolve relative paths against the worktree dir.
+                [[ "$gitdir" != /* ]] && gitdir="$current/$gitdir"
+                gitdir="$(realpath -m "$gitdir")"
+                # If it's inside .../worktrees/<name>, strip those two components
+                # to get the main .git directory.
+                if [[ "$gitdir" == */worktrees/* ]]; then
+                    main_gitdir="${gitdir%/worktrees/*}"
+                    add_rw "$main_gitdir"
+                else
+                    add_rw "$gitdir"
+                fi
+            fi
             return 0
         fi
         current="$(dirname "$current")"
