@@ -65,10 +65,29 @@ add_rw() {
     fi
 }
 
+# Given a gitdir (the dir git stores state in, e.g. .../.git,
+# .../.git/worktrees/<n>, or .../.git/modules/<path>), find and add the
+# top-level .git directory of the chain, so tools like GitGutter can write
+# index/HEAD/objects no matter whether we're in a worktree or submodule.
+add_rw_top_gitdir() {
+    local gitdir="$1"
+    # Strip /worktrees/<n> and /modules/<path...> suffixes to get back to
+    # the owning .git directory. Submodule modules/ paths can be multi-level.
+    while [[ "$gitdir" == */worktrees/* || "$gitdir" == */modules/* ]]; do
+        if [[ "$gitdir" == */worktrees/* ]]; then
+            gitdir="${gitdir%/worktrees/*}"
+        else
+            gitdir="${gitdir%/modules/*}"
+        fi
+    done
+    add_rw "$gitdir"
+}
+
 # Find git root starting from a given directory and walk up.
-# If a .git folder is found, add its parent directory to R/W list.
-# If .git is a file (git worktree), also add the main repo's .git directory
-# (the one containing worktrees/<name>/) so GitGutter etc. can write index/HEAD.
+# - If .git is a directory: add the containing working tree.
+# - If .git is a file (worktree or submodule): also add the top-level .git
+#   directory of the repo chain (following gitdir: pointers), so the index,
+#   HEAD, and objects are writable.
 add_rw_git_root() {
     local start="$1"
     local current="$start"
@@ -78,23 +97,14 @@ add_rw_git_root() {
             return 0
         elif [[ -f "$current/.git" ]]; then
             add_rw "$current"
-            # Parse "gitdir: <path>" to locate the main repo's git dir.
-            local gitdir_line gitdir main_gitdir
+            local gitdir_line gitdir
             gitdir_line="$(head -n1 "$current/.git")"
             if [[ "$gitdir_line" == gitdir:* ]]; then
                 gitdir="${gitdir_line#gitdir:}"
                 gitdir="${gitdir# }"
-                # Resolve relative paths against the worktree dir.
                 [[ "$gitdir" != /* ]] && gitdir="$current/$gitdir"
                 gitdir="$(realpath -m "$gitdir")"
-                # If it's inside .../worktrees/<name>, strip those two components
-                # to get the main .git directory.
-                if [[ "$gitdir" == */worktrees/* ]]; then
-                    main_gitdir="${gitdir%/worktrees/*}"
-                    add_rw "$main_gitdir"
-                else
-                    add_rw "$gitdir"
-                fi
+                add_rw_top_gitdir "$gitdir"
             fi
             return 0
         fi
