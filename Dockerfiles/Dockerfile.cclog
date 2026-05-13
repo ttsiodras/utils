@@ -1,0 +1,6 @@
+FROM golang:1.24-alpine AS builder
+RUN go install github.com/annenpolka/cclog/cmd/cclog@latest
+
+FROM alpine:latest
+COPY --from=builder /go/bin/cclog /usr/local/bin/cclog
+ENTRYPOINT ["cclog"]
