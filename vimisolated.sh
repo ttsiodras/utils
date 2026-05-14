@@ -166,6 +166,7 @@ for d in "${_path_dirs[@]}"; do
     cand="$d/vim"
     [[ -x "$cand" ]] || continue
     [[ "$(realpath "$cand")" == "$SELF" ]] && continue
+    [[ "$cand" == */bin.local/vim ]] && continue
     REAL_VIM="$cand"
     break
 done
