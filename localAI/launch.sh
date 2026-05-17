@@ -1,10 +1,11 @@
 # launch.sh
 source ./launch_common.sh
 
-echo "Model:"
-echo "  1) Gemma 4 E4B"
-echo "  2) Ternary-Bonsai-8B"
-read -rp "Choice: " model_choice
+# echo "Model:"
+# echo "  1) Gemma 4 E4B"
+# echo "  2) Ternary-Bonsai-8B"
+# read -rp "Choice: " model_choice
+model_choice=1
 
 echo "Backend:"
 echo "  1) ROCM"
@@ -13,7 +14,6 @@ read -rp "Choice: " backend_choice
 
 case $model_choice in
   1) MODEL_ARGS="$GEMMA_ARGS" ;;
-  2) MODEL_ARGS="$TERN_ARGS" ;;
   *) echo "Invalid model choice"; exit 1 ;;
 esac
 
