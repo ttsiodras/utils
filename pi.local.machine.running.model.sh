@@ -101,5 +101,7 @@ EOF
 
 # (b) Launch isolate.sh with internal socat bridge
 # We wrap the command in bash -c to launch socat in the background before npx pi
+#
+# bash -c "socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"" -- "$@"
 isolate.sh --rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK" \
-    bash -c "socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"" -- "$@"
+    tmux new-session -A -s pi_session "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"' -- \"$@\""
