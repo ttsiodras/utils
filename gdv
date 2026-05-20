@@ -1,0 +1,6 @@
+#!/bin/bash
+#
+# Almost every day, I need to edit the modified files of a .git repo inside vim,
+# and stage things via GitGutter for commits. So...
+#
+vim $(git -C $(git rev-parse --show-toplevel) diff --name-only | sed "s|^|$(git rev-parse --show-toplevel)/|")
