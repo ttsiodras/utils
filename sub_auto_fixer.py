@@ -1,200 +1,258 @@
 #!/usr/bin/env python3
+"""
+sub_auto_fixer.py — generic subtitle-to-video matcher
+
+Uses a combined score:
+  - Dice coefficient for token overlap (content match)
+  - LCS (longest common subsequence) for word order
+
+Final score = 0.6 * dice + 0.4 * lcs_normalized
+"""
 import os
+import re
 import sys
 
 # common extensions for video and subtitle files
-VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.wmv', '.mov', '.flv')
-SUBTITLE_EXTENSIONS = ('.srt', '.sub', '.txt', '.ass')
+VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.wmv', '.mov', '.flv', '.m4v', '.mpeg', '.mpg')
+SUBTITLE_EXTENSIONS = ('.srt', '.sub', '.txt', '.ass', '.ssa', '.smi', '.idx')
 
-# Maximum allowed Levenshtein distance for a match
-# You may need to adjust the threshold based on how noisy the filenames are.
-DISTANCE_THRESHOLD = 15
+# Dice coefficient theory
+#
+#   Dice(A,B) = 2 * O / (W1 + W2)
+#
+#   where:
+#
+#     W1  = sum_{tok in A} wt(tok) * cnt_A(tok)
+#     W2  = sum_{tok in B} wt(tok) * cnt_B(tok)
+#     O   = sum_{tok in A n B} wt(tok) * min(cnt_A(tok), cnt_B(tok))
+#
+#     wt(tok) = 2 if tok is numeric else 1
+#     cnt_X(tok) = count of tok in multiset X
+#
+# Example: "Lesson 01" vs "Lesson 01 - jtag":
+#
+#   A = ["lesson","01"]           B = ["lesson","01","jtag"]
+#
+#                A n B = ["lesson","01"]
+#
+#   W1 = 1(lesson)*1 + 2(01)*1               = 3
+#   W2 = 1(lesson)*1 + 2(01)*1 + 1(jtag)*1   = 4
+#   O  = 1(lesson)*min(1,1) + 2(01)*min(1,1) = 3
+#
+#          Dice(A,B) = 2 * O / (W1 + W2)
+#      =>  Dice = 2 * 3 / (3+4) = 6/7 = 0.857 (well above 0.3)
+#
+#
+# The problem with Dice alone - it ignores order of tokens.
+# We need to take order into account, and create a combined score (Dice, LCS)
+#
+# Minimum combined score for a match to be accepted.
+MIN_SCORE = 0.30
 
 
-def levenshtein_distance(s1: str, s2: str) -> int:
+def tokenize(text: str) -> list[str]:
+    """Split text into lower-case alphanumeric tokens on any non-alphanumeric
+    boundary.  Ignores empty fragments."""
+    tokens = re.split(r'[^a-zA-Z0-9]+', text)
+    return [t.lower() for t in tokens if t]
+
+
+def _is_numeric(t: str) -> bool:
+    """Return True if the token looks like a number (possibly with leading
+    zeros).  Lesson numbers (01, 02, 101 etc.) are the key identity
+    markers in filenames, so we give them double weight."""
+    t_clean = t.lower()
+    if t_clean.startswith('s') and 'e' in t_clean:
+        return True
+    if 'x' in t_clean:
+        return True
+    return t.replace('.', '').isdigit()
+
+
+def lcs_length(t1: list[str], t2: list[str]) -> int:
+    """Return length of the longest common subsequence of two token lists.
+    Uses simple dynamic programming - fine for short filenames."""
+    n, m = len(t1), len(t2)
+    if n == 0 or m == 0:
+        return 0
+    # Space-optimized version (filenames are short)
+    prev = [0] * (m + 1)
+    curr = [0] * (m + 1)
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if t1[i-1] == t2[j-1]:
+                curr[j] = prev[j-1] + 1
+            else:
+                curr[j] = max(prev[j], curr[j-1])
+        prev, curr = curr, prev
+    return prev[m]
+
+
+def dice_coefficient(t1: list[str], t2: list[str]) -> float:
+    """Sorensen–Dice coefficient, weighted so numeric tokens (likely lesson
+    numbers) count double.  Returns a float in [0.0, 1.0].
+
+    Example with "Lesson 01" vs "Lesson 01 - jtag":
+      t1=["lesson","01"], t2=["lesson","01","jtag"]
+      w1 = 1(lesson) + 2(01) = 3
+      w2 = 1(lesson) + 2(01) + 1(jtag) = 4
+      overlap = min(1,1)*1(lesson) + min(1,1)*2(01) = 3
+      dice = 2*3/(3+4) = 0.857
     """
-    Calculates the Levenshtein distance between two strings, s1 and s2.
+    from collections import Counter
+    c1, c2 = Counter(t1), Counter(t2)
+    w1 = sum(2 if _is_numeric(t) else 1 for t in t1)
+    w2 = sum(2 if _is_numeric(t) else 1 for t in t2)
+    if not w1 or not w2:
+        return 0.0
+    overlap_weight = 0
+    common = set(c1) & set(c2)
+    for tok in common:
+        w_tok = 2 if _is_numeric(tok) else 1
+        overlap_weight += w_tok * min(c1[tok], c2[tok])
+    return 2.0 * overlap_weight / (w1 + w2)
 
-    The Levenshtein distance (or edit distance) quantifies the minimum number
-    of single-character edits (insertions, deletions, or substitutions)
-    required to change one word into the other. This algorithm uses a
-    classic dynamic programming approach, which is highly effective for
-    this type of string comparison problem.
 
-    Detailed Algorithm Explanation:
-    ---------------------------
+def combined_score(t1: list[str], t2: list[str]) -> float:
+    """Combined similarity score using Dice + LCS.
 
-    1. Initialization:
-        The core of the algorithm involves constructing and filling a matrix,
-        typically denoted as D, where D[i][j] represents the edit distance
-        between the prefix s1[1...i] and the prefix s2[1...j].
-        The matrix is initialized such that the first row D[0][j] and
-        the first column D[i][0] are sequentially filled with 0, 1, 2, 3...
-        up to the length of the respective string. This represents the cost of
-        transforming an empty string into a non-empty prefix (pure insertions
-        or deletions).
-
-    2. Iteration and Recurrence Relation:
-        We iterate through the rest of the matrix. For each cell D[i][j],
-        the value is calculated based on the minimum cost derived from three
-        possible preceding operations:
-
-        a. Deletion: The cost of deleting s1[i] from s1. This cost comes from
-           the cell D[i-1][j] plus 1.
-        b. Insertion: The cost of inserting s2[j] into s1. This cost comes
-           from the cell D[i][j-1] plus 1.
-        c. Substitution/Match: The cost of transforming s1[i] to s2[j]. This
-           cost comes from the cell D[i-1][j-1]. If s1[i] equals s2[j], the
-           cost is 0 (a match); otherwise, the cost is 1 (a substitution).
-
-        The recurrence relation is:
-        D[i][j] = min(
-            D[i-1][j] + 1,             # Deletion
-            D[i][j-1] + 1,             # Insertion
-            D[i-1][j-1] + cost_of_sub    # Substitution/Match
-        )
-
-    3. Optimization (Space Efficiency):
-        Although the concept is described using a full matrix D (size m x n),
-        this specific implementation optimizes space by only storing two rows
-        (the 'previous_row' and the 'current_row') instead of the whole matrix.
-        This reduces the space complexity from O(m*n) to O(min(m, n)).
-
-    4. Time and Space Complexity:
-        The time complexity remains O(m*n), where m and n are the lengths of
-        the two strings. The space complexity is optimized to O(min(m, n)).
-
-    Parameters:
-        s1 (str): The first string.
-        s2 (str): The second string.
-
-    Returns:
-        int: The minimum Levenshtein distance between s1 and s2.
-
-    Examples:
-        >>> levenshtein_distance("kitten", "sitting")  # k/s, e/i, add 'g'
-        3
+    score = alpha * dice + (1-alpha) * lcs_normalized
     """
-    if len(s1) < len(s2):
-        return levenshtein_distance(s2, s1)
-
-    if len(s2) == 0:
-        return len(s1)
-
-    # Initialize the matrix
-    previous_row = range(len(s2) + 1)
-
-    for i, char1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, char2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (0 if char1 == char2 else 1)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-
-    return previous_row[-1]
+    ALPHA = 0.6  # weight for Dice vs LCS
+    dice = dice_coefficient(t1, t2)
+    lcs = lcs_length(t1, t2)
+    if not t1 or not t2:
+        return 0.0
+    lcs_norm = 2.0 * lcs / (len(t1) + len(t2))
+    return ALPHA * dice + (1 - ALPHA) * lcs_norm
 
 
 def find_files(directory: str, extensions: tuple) -> list[str]:
-    """Scans the directory for files matching the given extensions."""
-    found_files = []
+    """Return regular files in `directory` whose lowercase name ends with any
+    of the given extensions."""
+    found = []
     try:
         for filename in os.listdir(directory):
             if filename.lower().endswith(extensions):
-                full_path = os.path.join(directory, filename)
-                if os.path.exists(full_path) and not os.path.isdir(full_path):
-                    found_files.append(filename)
+                full = os.path.join(directory, filename)
+                if os.path.exists(full) and not os.path.isdir(full):
+                    found.append(filename)
     except FileNotFoundError:
         print(f"[!] Error: No folder found at {directory}", file=sys.stderr)
         sys.exit(1)
-    return found_files
+    return found
 
 
-def auto_sub_fixer(directory: str = '.') -> None:
-    """
-    Finds videos and subtitles, compares their basenames using Levenshtein
-    distance, and emits the necessary mv commands for the best match per video.
-    """
-    print(f"[*] Working in: {os.path.abspath(directory)} ---", file=sys.stderr)
-    print(f"[*] Levenshtein dist <= {DISTANCE_THRESHOLD}\n", file=sys.stderr)
+def auto_sub_fixer(directory: str = '.', debug: bool = False) -> None:
+    print(f"[*] Working in: {os.path.abspath(directory)}\n", file=sys.stderr)
 
-    # 1. Find all relevant files
     video_files = find_files(directory, VIDEO_EXTENSIONS)
-    sub_files = find_files(directory, SUBTITLE_EXTENSIONS)
+    sub_files   = find_files(directory, SUBTITLE_EXTENSIONS)
 
-    if not video_files or not sub_files:
-        print("[!] No videos or subtitles found. Exiting.")
+    if not video_files:
+        print("[!] No video files found.  Exiting.", file=sys.stderr)
+        return
+    if not sub_files:
+        print("[!] No subtitle files found.  Exiting.", file=sys.stderr)
         return
 
     print(f"[*] Found {len(video_files)} videos and {len(sub_files)} subs.\n",
           file=sys.stderr)
 
+    # ---- Pre-tokenize all subtitle basenames --------------------------------
+    #  key = original subtitle basename, value = token list
+    sub_basename_tokens = {}
+    for sf in sub_files:
+        bn = os.path.splitext(sf)[0]
+        sub_basename_tokens[bn] = tokenize(bn)
+
+    # ---- Match each video --------------------------------------------------
+    script_path = "/dev/shm/rename.sh"
+    # Clear the script file
+    with open(script_path, "w"):
+        pass
+
+    used_subs = set()
     matches_found = 0
-    _ = open("/dev/shm/rename.sh", "w")
 
-    # 2. Iterate through all videos and find the best matching subtitle
     for video_file in video_files:
-        # Extract the base name of the video (e.g., "movie" from "movie.mp4")
         video_basename = os.path.splitext(video_file)[0]
+        video_tokens   = tokenize(video_basename)
 
-        print(f"[*] Video: {video_file} (Basename: '{video_basename}')",
-              file=sys.stderr)
+        best_bn  = None        # subtitle basename that won
+        best_sf  = None        # original subtitle filename
+        best_score = MIN_SCORE - 0.001   # start below threshold
 
-        best_match_sub_file = None
-        # Initialize higher than the threshold
-        min_distance = DISTANCE_THRESHOLD + 1
+        for sf in sub_files:
+            bn = os.path.splitext(sf)[0]
+            # Skip already-used subtitles
+            if bn in used_subs:
+                continue
 
-        for sub_file in sub_files:
-            # Extract the base name of the subtitle (e.g., "movie_v2"
-            # from "movie_v2.srt")
-            sub_basename = os.path.splitext(sub_file)[0]
+            tokens = sub_basename_tokens[bn]
+            score  = combined_score(video_tokens, tokens)
+            if score > best_score:
+                best_score = score
+                best_bn    = bn
+                best_sf    = sf
 
-            # Calculate distance
-            distance = levenshtein_distance(video_basename, sub_basename)
+        if best_sf is None or best_score < MIN_SCORE:
+            print(f"[!] Video '{video_file}' — no matching sub within "
+                  f"threshold ({best_score:.2f} < {MIN_SCORE}).", file=sys.stderr)
+            continue
 
-            if distance < min_distance:
-                min_distance = distance
-                best_match_sub_file = sub_file
+        # Debug: show all candidate scores
+        if debug:
+            print(f"    Video: {video_file}", file=sys.stderr)
+            for sf in sub_files:
+                bn = os.path.splitext(sf)[0]
+                if bn in used_subs:
+                    continue
+                tokens = sub_basename_tokens[bn]
+                d = dice_coefficient(video_tokens, tokens)
+                l = lcs_length(video_tokens, tokens)
+                lnorm = 2.0*l/(len(video_tokens)+len(tokens)) if (len(video_tokens)+len(tokens)) > 0 else 0
+                c = combined_score(video_tokens, tokens)
+                print(f"      sub={sf:45s} dice={d:.3f} lcs={lnorm:.3f} comb={c:.3f}", file=sys.stderr)
+            print(f"    -> Best: {best_sf} (comb={best_score:.3f})\n", file=sys.stderr)
 
-        # 3. Print the best match command
-        if best_match_sub_file:
+        original_sub_ext = os.path.splitext(best_sf)[1]
+        target_name = video_basename + original_sub_ext
 
-            # Determine the target filename for the subtitle.
-            # The goal is to match the video basename but keep the original
-            # subtitle extension.
-            original_sub_ext = os.path.splitext(best_match_sub_file)[1]
-            trgt_sub_file = video_basename + original_sub_ext
-
-            if best_match_sub_file == trgt_sub_file:
-                print("[*] Best match already there.", file=sys.stderr)
-                print(f"[*] ====> {best_match_sub_file} {trgt_sub_file}",
-                      file=sys.stderr)
-            else:
-                # Print the required command, include distance for reference
-                print(f"[*] Best match found, distance: {min_distance}",
-                      file=sys.stderr)
-                open("/dev/shm/rename.sh", "a").write(
-                    f"mv -iv \"{best_match_sub_file}\" \"{trgt_sub_file}\"\n")
-                matches_found += 1
+        if best_sf == target_name:
+            print(f"[*] Video '{video_file}' — sub already in place.",
+                  file=sys.stderr)
         else:
-            print("[!] No subs found within threshold.", file=sys.stderr)
+            print(f"[*] Video '{video_file}' matches '{best_sf}' (comb={best_score:.3f})",
+                  file=sys.stderr)
+            with open(script_path, "a") as out:
+                out.write(f"mv -iv \"{best_sf}\" \"{target_name}\"\n")
+            matches_found += 1
 
+        # Mark used so the same sub isn't re-assigned to a different video
+        used_subs.add(best_bn)
+
+    # ---- Final report ------------------------------------------------------
     if matches_found == 0:
-        print("\n[!] Did not detect any subtitle fixups.", file=sys.stderr)
-        os.unlink("/dev/shm/rename.sh")
+        print(f"\n[!] No subtitle renames needed.\n", file=sys.stderr)
+        if os.path.exists(script_path):
+            os.unlink(script_path)
     else:
-        print(f"\n[*] Found {matches_found} renames.\n", file=sys.stderr)
+        print(f"\n[*] {matches_found} rename(s) written to {script_path}.\n",
+              file=sys.stderr)
         print("Run:\n\t. /dev/shm/rename.sh", file=sys.stderr)
 
 
 if __name__ == "__main__":
+    debug = '--debug' in sys.argv or '-d' in sys.argv
+    if debug:
+        sys.argv = [a for a in sys.argv if a not in ('--debug', '-d')]
     if len(sys.argv) == 2:
-        auto_sub_fixer(sys.argv[1])
+        auto_sub_fixer(sys.argv[1], debug=debug)
     elif len(sys.argv) == 1:
-        auto_sub_fixer('.')
+        auto_sub_fixer('.', debug=debug)
     else:
         print("Usage:")
-        print(f"\t{sys.argv[0]} folder")
+        print(f"\t{sys.argv[0]} folder [--debug]")
         print("\n...or work on current folder:\n")
-        print(f"\t{sys.argv[0]}")
+        print(f"\t{sys.argv[0]} [--debug]")
