@@ -30,13 +30,16 @@ trap '[[ -n ${SOCAT_PID:-} ]] && kill "$SOCAT_PID" 2>/dev/null' EXIT
 
 # Query model info
 MODELS_JSON=$(curl -sf $URL/v1/models)
+# MODELS_JSON=$(curl -sf http://127.0.0.1:8081/v1/models)   # direct to llama-server
 if [ $? -ne 0 ] || [ -z "$MODELS_JSON" ]; then
   echo "[-] Could not reach model server at $URL - is it running?"
   exit 1
 fi
 
+
 # Try to get props for llama.cpp context size
 PROPS_JSON=$(curl -sf $URL/props || echo "{}")
+# PROPS_JSON=$(curl -sf http://127.0.0.1:8081/props || echo "{}")  # direct to llama-server
 
 read -r MODEL_ID CTX_SIZE < <(python3 -c "
 import sys, json
