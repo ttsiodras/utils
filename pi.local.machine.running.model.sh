@@ -52,6 +52,8 @@ try:
     
     # 1. Try vLLM style
     ctx_size = model.get('max_model_len')
+    if ctx_size is None:
+        ctx_size = model.get('meta', {}).get('n_ctx')
     
     # 2. Try llama.cpp nested style (default_generation_settings -> n_ctx)
     if ctx_size is None:
