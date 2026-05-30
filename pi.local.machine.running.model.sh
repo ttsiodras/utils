@@ -17,6 +17,19 @@ SOCK="$HOME/llama.sock"
 # Make this point to your locally running model:
 URL=http://127.0.0.1:8080
 
+# Shared parser expects die/usage to exist
+die()      { echo "error: $*" >&2; exit 1; }
+usage() {
+  cat >&2 <<'EOF'
+Usage: pi.local.machine.running.model.sh [isolate.sh OPTIONS] [-- pi OPTIONS]
+See isolate.sh --help for full isolate.sh option documentation.
+EOF
+  exit 2
+}
+
+# Reuse shared parser for isolate.sh options
+. "$SCRIPT_DIR/parse-isolation-options-common.sh"
+
 # (a) Check/Launch host relay
 if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:8080" >/dev/null; then
   echo "[+] Launching host socat relay..."
@@ -107,6 +120,13 @@ EOF
 # (b) Launch isolate.sh with internal socat bridge
 # We wrap the command in bash -c to launch socat in the background before npx pi
 #
-# bash -c "socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"" -- "$@"
-isolate.sh --rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK" \
-    tmux new-session -A -s pi_session "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"' -- \"$@\""
+ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK")
+for s in "${SERVERS_FILES[@]}"; do ISOLATE_ARGS+=(--servers "$s"); done
+[[ -n "$DNS_CSV" ]] && ISOLATE_ARGS+=(--dns "$DNS_CSV")
+for p in "${RW_PATHS[@]}"; do ISOLATE_ARGS+=(--rw "$p"); done
+for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
+[[ -n "$IFACE" ]] && ISOLATE_ARGS+=(--iface "$IFACE")
+(( PRIVATE_DEV )) || ISOLATE_ARGS+=(--host-dev)
+
+isolate.sh "${ISOLATE_ARGS[@]}" \
+    tmux new-session -A -s pi_session "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"' -- \"${APP[@]}\""

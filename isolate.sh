@@ -194,32 +194,12 @@ parse_server_line() {
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-IFACE="" DNS_CSV=""
-PRIVATE_DEV=1
-SERVERS_FILES=() RW_PATHS=() HIDE_PATHS=()
+# Reuse shared parser for isolate.sh options.
+# Parser is reused by e.g. pi.local.machine.running.model.sh
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+. "$SCRIPT_DIR/parse-isolation-options-common.sh"
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --servers)   [[ $# -ge 2 ]] || usage; SERVERS_FILES+=("$2"); shift 2 ;;
-        --servers=*) SERVERS_FILES+=("${1#*=}"); shift ;;
-        --iface)     [[ $# -ge 2 ]] || usage; IFACE="$2"; shift 2 ;;
-        --iface=*)   IFACE="${1#*=}"; shift ;;
-        --dns)       [[ $# -ge 2 ]] || usage; DNS_CSV="$2"; shift 2 ;;
-        --dns=*)     DNS_CSV="${1#*=}"; shift ;;
-        --rw)        [[ $# -ge 2 ]] || usage; RW_PATHS+=("$2"); shift 2 ;;
-        --rw=*)      RW_PATHS+=("${1#*=}"); shift ;;
-        --hide)      [[ $# -ge 2 ]] || usage; HIDE_PATHS+=("$2"); shift 2 ;;
-        --hide=*)    HIDE_PATHS+=("${1#*=}"); shift ;;
-        --host-dev)  PRIVATE_DEV=0; shift ;;
-        --help|-h)   usage ;;
-        --)          shift; break ;;
-        -*)          die "unknown option: $1" ;;
-        *)           break ;;
-    esac
-done
-
-[[ $# -ge 1 ]] || usage
-APP=("$@")
+[[ ${#APP[@]} -ge 1 ]] || usage
 
 # ---------------------------------------------------------------------------
 # Dependency checks
