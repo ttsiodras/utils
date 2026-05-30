@@ -14,27 +14,41 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 SOCK="$HOME/llama.sock"
 
-# Make this point to your locally running model:
-URL=http://127.0.0.1:8080
-
 # Shared parser expects die/usage to exist
 die()      { echo "error: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-Usage: pi.local.machine.running.model.sh [isolate.sh OPTIONS] [-- pi OPTIONS]
+Usage: pi.local.machine.running.model.sh [--port PORT] [isolate.sh OPTIONS] [-- pi OPTIONS]
 See isolate.sh --help for full isolate.sh option documentation.
+PORT defaults to 8080.
 EOF
   exit 2
 }
+
+# Wrapper-specific: --port for the host-side model endpoint.
+# The inner sandbox socat always listens on 8080; this only changes
+# what the host-side relay (and curl) talk to.
+PORT=8080
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port=*) PORT="${1#*=}"; shift ;;
+        --port)  [[ $# -ge 2 ]] || usage; PORT="$2"; shift 2 ;;
+        *)       break ;;
+    esac
+done
+
+# Make this point to your locally running model (or SSH-forwarded remote):
+URL=http://127.0.0.1:$PORT
 
 # Reuse shared parser for isolate.sh options
 . "$SCRIPT_DIR/parse-isolation-options-common.sh"
 
 # (a) Check/Launch host relay
-if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:8080" >/dev/null; then
+if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:$PORT" >/dev/null; then
+    echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
   echo "[+] Launching host socat relay..."
   rm -f "$SOCK"
-  socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:8080 &
+  socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT &
   SOCAT_PID=$!
   # Give it a moment to bind
   sleep 0.2
@@ -50,7 +64,7 @@ if [ $? -ne 0 ] || [ -z "$MODELS_JSON" ]; then
 fi
 
 
-# Try to get props for llama.cpp context size
+# Try to get props for context size
 PROPS_JSON=$(curl -sf $URL/props || echo "{}")
 # PROPS_JSON=$(curl -sf http://127.0.0.1:8081/props || echo "{}")  # direct to llama-server
 
@@ -88,13 +102,15 @@ except Exception:
 MAX_TOKENS=$CTX_SIZE
 echo "[+] Model: $MODEL_ID  |  Context: $CTX_SIZE  |  MaxTokens: $MAX_TOKENS"
 
+sleep 1
+
 mkdir -p ~/.pi/agent/
 
 cat > ~/.pi/agent/models.json << EOF
 {
   "providers": {
     "local-vllm": {
-      "baseUrl": "$URL/v1",
+      "baseUrl": "http://127.0.0.1:8080/v1",
       "api": "openai-completions",
       "apiKey": "dummy",
       "compat": {
