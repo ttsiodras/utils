@@ -73,27 +73,34 @@ import sys, json
 try:
     models_data = json.loads(sys.argv[1])
     props_data = json.loads(sys.argv[2])
-    
+
     model = models_data['data'][0]
     model_id = model['id']
-    
+
     # 1. Try vLLM style
     ctx_size = model.get('max_model_len')
     if ctx_size is None:
         ctx_size = model.get('meta', {}).get('n_ctx')
-    
+
     # 2. Try llama.cpp nested style (default_generation_settings -> n_ctx)
     if ctx_size is None:
         ctx_size = props_data.get('default_generation_settings', {}).get('n_ctx')
-        
+
+    # 2. Try llama.cpp ds4 style
+    if ctx_size is None:
+        try:
+            ctx_size = model.get('context_length')
+        except:
+            ctx_size = None
+
     # 3. Try llama.cpp top-level style (n_ctx)
     if ctx_size is None:
         ctx_size = props_data.get('n_ctx')
-        
+
     # 4. Fallback
     if ctx_size is None:
         ctx_size = 8192
-        
+
     print(f'{model_id} {int(ctx_size)}')
 except Exception:
     print('unknown-model 8192')
