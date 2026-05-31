@@ -80,7 +80,7 @@ def compute_md5(filepath: AbsPath) -> HashResult:
                 hasher.update(chunk)
         return hasher.hexdigest()
     except OSError:
-        # Return None to indicate a failure to read the file (e.g. PermissionError)
+        # Return None to indicate a failure to read the file (e.g. permissions)
         return None
 
 
@@ -111,13 +111,15 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
     Raises FileNotFoundError if the folder does not exist.
     """
     if not os.path.isdir(top_folder):
-        raise FileNotFoundError(f"Folder does not exist: {to_printable(top_folder)}")
+        raise FileNotFoundError(
+            f"Folder does not exist: {to_printable(top_folder)}")
     results: List[FileMetadata] = []
     count = 0
     for dirpath, _, filenames in os.walk(top_folder, followlinks=False):
         for filename in filenames:
             full_path_abs = os.path.join(dirpath, filename)
-            # Skip symbolic links to prevent infinite loops or scanning outside top_folder.
+            # Skip symbolic links to prevent infinite loops
+            # or scanning outside top_folder.
             if os.path.islink(full_path_abs):
                 continue
             rel_path = os.path.relpath(full_path_abs, top_folder)
@@ -178,7 +180,7 @@ class FileDB:
     def load_folder(
         self, top_folder_bytes: SafeTopFolder
     ) -> Dict[TopFolderAndFullPath, FileRecord]:
-        """Load rows for a single top_folder, keyed by (top_folder, full_path)."""
+        """Return rows for top_folder, keyed by (top_folder, full_path)."""
         cursor = self.conn.execute(
             'SELECT filename, full_path, top_folder, mtime, md5, filesize '
             'FROM files WHERE top_folder = ?',
@@ -210,11 +212,11 @@ class FileDB:
         self.conn.commit()
 
     def delete_paths(self, paths: List[TopFolderAndFullPath]) -> None:
-        """Delete rows by (top_folder, full_path) tuples. Caller must commit."""
-        for top_folder, full_path in paths:
-            self.conn.execute(
-                'DELETE FROM files WHERE top_folder = ? AND full_path = ?',
-                (top_folder, full_path))
+        """Delete rows by (top_folder, full_path) tuples. Caller commits."""
+        self.conn.executemany(
+            'DELETE FROM files WHERE top_folder = ? AND full_path = ?',
+            paths,
+        )
 
     def query_limit(self, limit: int) -> List[LimitCheckResult]:
         """Find (full_path, md5) pairs that appear in fewer than ``limit``
@@ -260,10 +262,10 @@ def sync_files_with_md5(
     files: List[FileMetadata],
     ncores: int,
 ) -> None:
-    """Compute MD5s for *files*, printing and committing each result as it arrives."""
+    """Compute MD5s for *files*, printing and committing as results arrive."""
     if not files:
         return
-    # Map absolute paths back to Metadata objects to retrieve context after hashing.
+    # Map absolute paths back to Metadata objects (get context after hashing)
     path_to_item: Dict[AbsPath, FileMetadata] = {
         os.path.join(item.top_folder, item.full_path): item for item in files
     }
@@ -275,7 +277,8 @@ def sync_files_with_md5(
         if md5 is None:
             print(f"[!] MD5 ERROR, could not read: {to_printable(abs_bytes)}")
         else:
-            print(f"[-] MD5: {count}/{total} files, computed MD5 for {to_printable(abs_bytes)}")
+            print(f"[-] MD5: {count}/{total} files, "
+                  f"computed MD5 for {to_printable(abs_bytes)}")
         # Update the database immediately for this file.
         # Frequent commits ensure data is saved on crash.
         db.upsert_with_md5(item, md5)
@@ -285,7 +288,7 @@ def sync_files_with_md5(
 def find_changes(
     db: FileDB, top_folder_bytes: SafeTopFolder
 ) -> Tuple[Insertions, Updates, Deletions]:
-    """Compare filesystem state with database and return categorised changes."""
+    """Compare filesystem state with database, return categorised changes."""
     fs_data = scan_folder(top_folder_bytes)
     db_data = db.load_folder(top_folder_bytes)
     fs_paths = {item.full_path for item in fs_data}
@@ -298,8 +301,11 @@ def find_changes(
         if key not in db_data:
             # File exists on disk but not in DB.
             to_insert.append(item)
-        elif db_data[key].mtime != item.mtime or db_data[key].filesize != item.filesize:
-            # File metadata (mtime or size) changed; requires re-hashing.
+        elif (db_data[key].mtime != item.mtime
+              or db_data[key].filesize != item.filesize
+              or db_data[key].md5 is None):
+            # File metadata (mtime or size) changed, or previous MD5
+            # computation failed (md5 is None); requires re-hashing.
             to_update.append(item)
 
     # Identify files in DB that are no longer present on the filesystem.
@@ -315,7 +321,10 @@ def perform_sync(db: FileDB, top_folder: str, ncores: int) -> None:
     Inserts new files, updates rows whose mtime or filesize changed,
     and removes rows for files that no longer exist on disk.
     """
-    top_bytes: SafeTopFolder = os.path.normpath(top_folder).encode()
+    # Resolve symlinks and use os.fsencode() for correct POSIX byte encoding.
+    top_bytes: SafeTopFolder = os.fsencode(
+        os.path.realpath(os.path.normpath(top_folder))
+    )
     to_insert, to_update, to_delete = find_changes(db, top_bytes)
     sync_files_with_md5(db, to_insert + to_update, ncores)
     if to_delete:
@@ -344,11 +353,22 @@ def run_limit_check(db: FileDB, limit: int, report_path: str) -> None:
 def scan_target(
     top_folder: Optional[SafeTopFolder], rows: List[FileRecord]
 ) -> List[FileMetadata]:
-    """Scan filesystem for *top_folder* or all top_folders found in *rows*."""
-    if top_folder is None:
-        top_folders: Set[SafeTopFolder] = {row.top_folder for row in rows}
-        return [entry for tf in top_folders for entry in scan_folder(tf)]
-    return scan_folder(top_folder)
+    """Scan filesystem for *top_folder* or all top_folders found in *rows*.
+
+    If a top_folder from the DB no longer exists on disk, a warning is
+    printed and that folder is skipped instead of crashing the whole run.
+    """
+    if top_folder is not None:
+        return scan_folder(top_folder)
+
+    top_folders: Set[SafeTopFolder] = {row.top_folder for row in rows}
+    results: List[FileMetadata] = []
+    for tf in top_folders:
+        try:
+            results.extend(scan_folder(tf))
+        except FileNotFoundError:
+            print(f"[!] Top folder missing, skipping: {to_printable(tf)}")
+    return results
 
 
 def compute_md5s_for_matches(
@@ -356,7 +376,7 @@ def compute_md5s_for_matches(
     db_data: Dict[TopFolderAndFullPath, HashResult],
     ncores: int,
 ) -> Dict[TopFolderAndFullPath, HashResult]:
-    """Compute MD5s (keyed by (top_folder, full_path)) for FS items that exist in DB.
+    """Compute MD5s by (top_folder, full_path) for FS items that exist in DB.
 
     Streams results as workers finish, printing each one immediately.
     """
@@ -374,7 +394,8 @@ def compute_md5s_for_matches(
         count += 1
         percent = (count / total) * 100
         if percent >= last_percent + 1 or count == total:
-            print(f"\r[-] Validation: {percent:.2f}% ({count}/{total})", end="", flush=True)
+            print(f"\r[-] Validation: {percent:.2f}% ({count}/{total})",
+                  end="", flush=True)
             last_percent = percent
         result[abs_to_key[abs_bytes]] = md5
     print()
@@ -385,7 +406,10 @@ def classify_entries(
     db_data: Dict[TopFolderAndFullPath, HashResult],
     fs_lookup: Dict[TopFolderAndFullPath, FileMetadata],
     computed_md5s: Dict[TopFolderAndFullPath, HashResult],
-) -> Tuple[List[MatchEntry], List[MismatchEntry], List[MatchEntry], List[NewEntry]]:
+) -> Tuple[List[MatchEntry],
+           List[MismatchEntry],
+           List[MatchEntry],
+           List[NewEntry]]:
     """Return (match, mismatch, missing, new_files) lists."""
     match: List[MatchEntry] = []
     mismatch: List[MismatchEntry] = []
@@ -417,7 +441,8 @@ def write_report(
         if match:
             f.write("=== MATCH ===\n")
             for tf, p, md5 in match:
-                f.write(f"MATCH: {to_printable(tf)}/{to_printable(p)} (md5={md5})\n")
+                f.write(f"MATCH: {to_printable(tf)}/{to_printable(p)} "
+                        f"(md5={md5})\n")
             f.write("\n")
         if mismatch:
             f.write("=== MISMATCH ===\n")
@@ -432,7 +457,8 @@ def write_report(
         if missing:
             f.write("=== MISSING ===\n")
             for tf, p, exp in missing:
-                line = f"MISSING: {to_printable(tf)}/{to_printable(p)} (expected_md5={exp})"
+                line = f"MISSING: {to_printable(tf)}/{to_printable(p)} " + \
+                       f"(expected_md5={exp})"
                 print(f"[!] {line}")
                 f.write(f"{line}\n")
             f.write("\n")
@@ -452,8 +478,8 @@ def run_validation(
     Generates a report with MATCH, MISMATCH, MISSING, and NEW sections.
     """
     top_bytes: Optional[SafeTopFolder] = (
-        None if target == 'all' else os.path.normpath(target).encode()
-    )
+        None if target == 'all'
+        else os.fsencode(os.path.realpath(os.path.normpath(target))))
     rows = db.get_rows_for_validation(top_bytes)
     db_data: Dict[TopFolderAndFullPath, HashResult] = {
         (row.top_folder, row.full_path): row.md5 for row in rows
@@ -467,7 +493,7 @@ def run_validation(
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse and return command line arguments, exiting with help if none given."""
+    """Parse and return command line arguments, otherwise exit with help."""
     parser = argparse.ArgumentParser(
         description=(
             'File scanner with SQLite tracking, parallel MD5, and validation.'
@@ -476,23 +502,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('top_folder', nargs='*', help='Top folder(s) to scan')
     parser.add_argument(
         '-n', '--ncores', type=int, default=None,
-        help='Number of cores for parallel MD5 computation (default: all available)',
+        help='Number of cores for parallel MD5 computation (default: all)',
     )
     parser.add_argument(
         '-l', '--limit', type=int, default=None,
-        help='Check that each (full_path, md5) appears in at least N distinct top_folders',
+        help='Verify each (full_path, md5) appears in at least N top_folders',
     )
     parser.add_argument(
         '-v', '--validate', nargs='?', const='all', default=None,
-        help='Validate DB rows against filesystem. Optional arg: top_folder or "all"',
+        help='Validate DB against filesystem. arg: top_folder or "all"',
     )
     parser.add_argument(
         '--db', type=str, default='files.db',
-        help='Path to SQLite database (default: files.db in current directory)',
+        help='Path to SQLite database (default: files.db in current folder)',
     )
     parser.add_argument(
         '--report', type=str, default='report.log',
-        help='Path to report file (default: report.log in current directory)',
+        help='Path to report file (default: report.log in current folder)',
     )
     args = parser.parse_args()
     if args.validate is None and args.limit is None and not args.top_folder:
@@ -517,18 +543,19 @@ def main() -> None:
             run_validation(db, args.validate, args.report, ncores)
             print(f"[-] Validation complete. Report written to {args.report}")
         elif args.limit is not None:
-            # Mode 2: Sync all provided folders, then find files with low redundancy.
+            # Mode 2: Sync all provided folders, and find low redundancy files.
             for folder in args.top_folder:
                 perform_sync(db, folder, ncores)
             run_limit_check(db, args.limit, args.report)
             print(f"[-] Limit check complete. Report written to {args.report}")
         else:
-            # Mode 3: Standard single folder synchronization.
+            # Mode 3: Standard synchronization - all provided folders.
             if not args.top_folder:
                 print("Error: No top folder provided for sync.")
                 sys.exit(1)
-            perform_sync(db, args.top_folder[0], ncores)
-            print(f"[-] DB sync complete for {args.top_folder[0]}")
+            for folder in args.top_folder:
+                perform_sync(db, folder, ncores)
+                print(f"[-] DB sync complete for {folder}")
 
 
 if __name__ == '__main__':
