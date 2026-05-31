@@ -12,7 +12,8 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 #
 # So... we tunnel via a pair of socats; over a UNIX domain socket.
 
-SOCK="$HOME/llama.sock"
+OUR_RANDOM_PID=$$
+SOCK="$HOME/llama.sock.$OUR_RANDOM_PID"
 
 # Shared parser expects die/usage to exist
 die()      { echo "error: $*" >&2; exit 1; }
@@ -152,4 +153,4 @@ for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
 (( PRIVATE_DEV )) || ISOLATE_ARGS+=(--host-dev)
 
 isolate.sh "${ISOLATE_ARGS[@]}" \
-    tmux new-session -A -s pi_session "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi \"\$@\"' -- \"${APP[@]}\""
+    tmux new-session -A -s pi_session_${OUR_RANDOM_PID} "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi --offline \"\$@\"' -- \"${APP[@]}\""
