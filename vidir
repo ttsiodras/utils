@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# vidir wrapper: vidir writes its scratch listing to $TMPDIR (default /tmp)
+# and then opens it in $EDITOR. When EDITOR is the isolated vim launcher,
+# isolate.sh gives vim a fresh private /tmp (firejail --private-tmp), so vim
+# never sees vidir's /tmp/dirXXXXX file and edits an empty buffer.
+#
+# Fix: point TMPDIR at a real dir outside /tmp. vimisolated.sh auto-adds a
+# --rw on the temp file's directory, so the isolated vim can read and write it.
+
+TMPDIR="${HOME}/.cache/vidir"
+mkdir -p "$TMPDIR"
+export TMPDIR
+
+# Find the next vidir on PATH that isn't this wrapper.
+SELF="$(realpath "$0")"
+REAL_VIDIR=""
+IFS=':' read -r -a _path_dirs <<< "$PATH"
+for d in "${_path_dirs[@]}"; do
+    [[ -z "$d" ]] && continue
+    cand="$d/vidir"
+    [[ -x "$cand" ]] || continue
+    [[ "$(realpath "$cand")" == "$SELF" ]] && continue
+    REAL_VIDIR="$cand"
+    break
+done
+[[ -n "$REAL_VIDIR" ]] || { echo "vidir-wrapper: no real vidir found on PATH" >&2; exit 1; }
+
+exec "$REAL_VIDIR" "$@"
