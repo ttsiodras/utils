@@ -27,6 +27,11 @@ ISOLATE="$HOME/bin/isolate.sh"
 ISO_ARGS=(--rw ~/.vim/backup/ --rw ~/.vim/viminfo/ --rw /tmp/.X11-unix/ --rw "$PWD")
 VIM_ARGS=()
 
+# Auto-add the network whitelist if present. isolate.sh accepts --servers
+# repeatably and concatenates them, so caller-supplied --servers still apply.
+WHITELIST="$HOME/.vim/whitelisted.servers"
+[[ -r "$WHITELIST" ]] && ISO_ARGS+=(--servers "$WHITELIST")
+
 # Split: consume known isolate.sh flags, pass everything else to vim.
 while [[ $# -gt 0 ]]; do
     case "$1" in
