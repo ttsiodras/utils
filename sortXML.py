@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 To be able to perform textual diff on two XML files,
 I needed to sort their attributes and elements.
@@ -11,7 +11,6 @@ Gotta write a blog post about it, someday...
 
 import re
 import sys
-import codecs
 from xml.sax.handler import ContentHandler
 import xml.sax
 
@@ -32,7 +31,6 @@ class InputFormatXMLHandler(ContentHandler):
         self._ws = re.compile(r'^\s*$')
 
     def startElement(self, name, attrs):
-        name = codecs.ascii_encode(name)[0]
         #parent = self._parents[-1]
         #print name, "under", parent._name
         #print attrs._attrs
@@ -54,11 +52,11 @@ def Print(node, indent=""):
         s += ' ' + " ".join(
             x+'="'+y+'"'
             for (x, y) in
-            sorted(node._attrs.items(), key=lambda (x, y): x))
+            sorted(node._attrs.items(), key=lambda xy: xy[0]))
     s += ">"
-    sys.stdout.write(s.encode("utf-8"))
+    sys.stdout.write(s)
     if node._characters != "":
-        sys.stdout.write(node._characters.encode("utf-8"))
+        sys.stdout.write(node._characters)
     if 0 != len(node._children):
         sys.stdout.write('\n')
 

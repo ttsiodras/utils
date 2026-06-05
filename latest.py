@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 This utility shows what files were recently modified, regardless
 of their folder depth. It starts by default on the current folder,
@@ -22,7 +22,7 @@ from stat import S_ISDIR
 
 
 def usage():
-    print '''\
+    print('''\
 Usage: {mainApp} <options> <folderToScan>
 
 where folderToScan is . by default, and options can be:
@@ -33,7 +33,7 @@ where folderToScan is . by default, and options can be:
     -a, --atime     order by access time
     -c, --ctime     order by ctime (creation time under Windows,
                     inode modification time under Unix)
-'''.format(mainApp=os.path.basename(sys.argv[0]))
+'''.format(mainApp=os.path.basename(sys.argv[0])))
     sys.exit(1)
 
 
@@ -67,7 +67,7 @@ def main():
         if len(args) > 1:
             usage()
         elif not os.path.isdir(args[0]):
-            print args[0], "is not a folder... Aborting..."
+            print(args[0], "is not a folder... Aborting...")
             sys.exit(1)
         else:
             target = args[0]
@@ -107,7 +107,7 @@ def main():
         span = len(str(maxSize))
         for k, l in sorted(completeList.items()):
             for v in l:
-                print "%s %*d %s" % (time.ctime(k), span, v[1], v[0])
+                print("%s %*d %s" % (time.ctime(k), span, v[1], v[0]))
 
 if __name__ == "__main__":
     main()

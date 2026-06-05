@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 This utility transcodes any input video file using mplayer and x265,
 encoding it at 0.06 bits per pixel. The result is then muxed by mkvmerge
@@ -10,11 +10,12 @@ Thanks to x265, the result is an optimal balance between size and quality.
 import os
 import sys
 import getopt
+from functools import reduce
 from misc import panic
 
 
 def usage():
-    print '''
+    print('''
 Usage: {prog} <options>
 
 where options are:
@@ -23,7 +24,7 @@ where options are:
     -i, --input <inputVideoFile>   The file to read from
     -o, --output <outputVideoFile> The output .mkv file to create
     -b, --bitsperpixel <bpp>       The desired bpp (defaults to 0.06)
-'''.format(prog=os.path.basename(sys.argv[0]))
+'''.format(prog=os.path.basename(sys.argv[0])))
     sys.exit(1)
 
 

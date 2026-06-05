@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -13,28 +13,28 @@ from xlrd import open_workbook
 stripStupidIntSuffixes = re.compile(r'\.0$')
 
 def stripStupidIntSuffix(x):
-    return stripStupidIntSuffixes.sub(u'', x)
+    return stripStupidIntSuffixes.sub('', x)
 
 
 def ProcessSheets(sheet):
-    for rowIndex in xrange(0, sheet.nrows):
+    for rowIndex in range(0, sheet.nrows):
         sys.stdout.write(
-            (u";".join(
+            ";".join(
                 stripStupidIntSuffix(
-                    unicode(sheet.cell(rowIndex, colIndex).value))
-                for colIndex in xrange(0, sheet.ncols))).encode('utf-8'))
-        print
+                    str(sheet.cell(rowIndex, colIndex).value))
+                for colIndex in range(0, sheet.ncols)))
+        print()
 
 
 def main():
     if len(sys.argv) < 2:
-        print "Usage:", os.path.basename(sys.argv[0]), " file.xls(x) ..."
+        print("Usage:", os.path.basename(sys.argv[0]), " file.xls(x) ...")
         sys.exit(1)
 
     excelFiles = sys.argv[1:]
     for xls_filename in excelFiles:
         if not os.path.exists(xls_filename):
-            print xls_filename, "not there! Aborting..."
+            print(xls_filename, "not there! Aborting...")
             sys.exit(1)
 
     for xls_filename in excelFiles:
@@ -45,7 +45,7 @@ def main():
                 ProcessSheets(sheet)
                 book.unload_sheet(name)
         except Exception as e:
-            print "Excel file failure: ", repr(e)
+            print("Excel file failure: ", repr(e))
             sys.exit(1)
 
 

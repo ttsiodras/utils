@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Dynamic programming in practise.
 Read my blog post at:

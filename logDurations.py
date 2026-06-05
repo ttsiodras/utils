@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 '''
@@ -33,11 +33,11 @@ import time
 
 locale.setlocale(locale.LC_ALL, 'el_GR.UTF-8')
 last = None
-for l in open(sys.argv[1]).readlines():
-    if u'EET' in l.strip().decode('utf-8'):
+for l in open(sys.argv[1], encoding='utf-8').readlines():
+    if 'EET' in l.strip():
         tup = time.strptime(l.strip(), '%a %d %b %Y %I:%M:%S %p %Z')
         new = time.mktime(tup)
         if last:
-            print new - last # , '#', new, '#', l,
+            print(new - last)  # , '#', new, '#', l,
         last = new
 

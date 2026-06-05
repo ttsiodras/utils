@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 A cmd-line filter for those pesky \u03b5\u03b3 strings...
 e.g.
@@ -11,4 +11,4 @@ import sys
 
 if __name__ == "__main__":
     for line in sys.stdin.readlines():
-        print line.decode('unicode_escape')
+        print(line.encode('latin-1', 'backslashreplace').decode('unicode_escape'))

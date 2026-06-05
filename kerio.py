@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 '''
 This utility generates the password part of the /etc/kerio-kvc.conf file.
 Example:
@@ -20,9 +20,9 @@ Example:
 
 import sys
 
-print "Password:",
-password = raw_input()
+print("Password:", end=' ')
+password = input()
 for c in password:
     s = hex(85 ^ (ord(c)))
     sys.stdout.write(s[2:]+":")
-print
+print()
