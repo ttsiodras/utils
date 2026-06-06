@@ -314,7 +314,12 @@ fi
 # ---------------------------------------------------------------------------
 # Network: allowlist case
 # ---------------------------------------------------------------------------
-
+#
+# Use --net=veth for both root and non-root.  When firejail runs as
+# root, --net=IFACE tries to MOVE the real interface into the sandbox
+# namespace, which fails if NetworkManager (or anything else) owns it.
+# --net=veth creates a virtual ethernet pair and handles all routing/NAT
+# internally.  It works identically regardless of uid.
 [[ -z "$IFACE" ]] && IFACE="$(detect_default_iface)"
 
 cat > "$NFT4" <<'EOF'
@@ -365,7 +370,8 @@ fi
 printf 'COMMIT\n' >> "$NFT4"
 printf 'COMMIT\n' >> "$NFT6"
 
-FJ_NET_ARGS=(--net="$IFACE" --netfilter="$NFT4" --netfilter6="$NFT6")
+# --net=veth avoids the "move real interface" failure mode for root.
+FJ_NET_ARGS=(--net=veth --netfilter="$NFT4" --netfilter6="$NFT6")
 
 if [[ -n "$DNS_CSV" ]]; then
     IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
