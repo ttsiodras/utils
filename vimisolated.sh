@@ -19,8 +19,19 @@
 # export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:/usr/local/packages/vim-9.1.0113/bin:$PATH"
 # vimisolated.sh --host-dev --servers=<(echo internal.company.server) "$@"
 
+# In my old machines, I have custom-built versions of node.
+# But dont always used them; only fallback to them if the system 'node' is older.
+LOCAL_NODE_VER="16.19.0"
+LOCAL_NODE_BIN="/usr/local/packages/node-v${LOCAL_NODE_VER}-linux-x64/bin"
+GLOBAL_NODE_VER=""
+command -v node >/dev/null 2>&1 && GLOBAL_NODE_VER=$(node -v | sed 's/^v//')
 
-export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:$PATH"
+if [[ -z "$GLOBAL_NODE_VER" ]] || \
+   [[ $(printf '%s\n%s' "$LOCAL_NODE_VER" "$GLOBAL_NODE_VER" | \
+         sort -V | \
+         head -n1) == "$GLOBAL_NODE_VER" ]]; then
+    export PATH="$LOCAL_NODE_BIN:$PATH"
+fi
 
 ISOLATE="$HOME/bin/isolate.sh"
 
