@@ -49,7 +49,7 @@ if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:$PORT" >/dev/null; the
     echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
   echo "[+] Launching host socat relay..."
   rm -f "$SOCK"
-  socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT &
+  socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT 2>/dev/null &
   SOCAT_PID=$!
   # Give it a moment to bind
   sleep 0.2
@@ -153,4 +153,4 @@ for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
 (( PRIVATE_DEV )) || ISOLATE_ARGS+=(--host-dev)
 
 isolate.sh "${ISOLATE_ARGS[@]}" \
-    tmux new-session -A -s pi_session_${OUR_RANDOM_PID} "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" & npx pi --offline \"\$@\"' -- \"${APP[@]}\""
+    tmux new-session -A -s pi_session_${OUR_RANDOM_PID} "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline \"\$@\"' -- \"${APP[@]}\""
