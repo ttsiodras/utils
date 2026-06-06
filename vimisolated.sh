@@ -24,7 +24,9 @@ export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:$PATH"
 
 ISOLATE="$HOME/bin/isolate.sh"
 
-ISO_ARGS=(--rw ~/.vim/backup/ --rw ~/.vim/undo/ --rw ~/.vim/viminfo/ --rw /tmp/.X11-unix/ --rw "$PWD")
+mkdir -p ~/.vim/{backup,swp,undo,viminfo}
+
+ISO_ARGS=(--rw ~/.vim/backup/ --rw ~/.vim/swp/ --rw ~/.vim/undo/ --rw ~/.vim/viminfo/ --rw /tmp/.X11-unix/ --rw "$PWD")
 VIM_ARGS=()
 
 # Auto-add the network whitelist if present. isolate.sh accepts --servers

@@ -12,6 +12,7 @@ COMMON_ARGS="
   --presence-penalty 0.0
   --repeat-penalty 1.0
   --no-mmap
+  --mlock
 "
 
 GEMMA_ARGS="
