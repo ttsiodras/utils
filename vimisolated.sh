@@ -25,6 +25,7 @@ export PATH="/usr/local/packages/node-v16.19.0-linux-x64/bin:$PATH"
 ISOLATE="$HOME/bin/isolate.sh"
 
 mkdir -p ~/.vim/{backup,swp,undo,viminfo,sessions}
+mkdir -p ~/.config/coc
 
 ISO_ARGS=(
     --rw ~/.vim/backup/
@@ -32,6 +33,7 @@ ISO_ARGS=(
     --rw ~/.vim/undo/
     --rw ~/.vim/viminfo/
     --rw ~/.vim/sessions/
+    --rw ~/.config/coc
     --rw /tmp/.X11-unix/ --rw "$PWD")
 VIM_ARGS=()
 
