@@ -34,6 +34,9 @@ Filesystem options:
 Network options:
   --servers FILE        Allow loopback + only the listed IPs/CIDRs/hostnames.
                         Without this flag the app gets NO network at all.
+                        NOTE: when run as root, --servers does NOT work;
+                        only total isolation is available.
+                        Run as a normal user for allowlisting.
   --iface IFACE         Network interface (auto-detected if omitted).
   --dns IP[,IP,...]     DNS resolvers reachable at runtime.
 
@@ -58,6 +61,9 @@ Isolation model:
   top (works for both files and directories). Everything outside $HOME is
   accessible under normal Unix permissions. /tmp is a fresh private tmpfs.
   Network traffic is blocked unless whitelisted via --servers.
+  NOTE: when run as root, only total isolation is available; --servers
+  (and thus selective allowlisting) is not supported. Run as a normal
+  user to use --servers.
 EOF
     exit 2
 }
@@ -315,11 +321,12 @@ fi
 # Network: allowlist case
 # ---------------------------------------------------------------------------
 #
-# Use --net=veth for both root and non-root.  When firejail runs as
-# root, --net=IFACE tries to MOVE the real interface into the sandbox
-# namespace, which fails if NetworkManager (or anything else) owns it.
-# --net=veth creates a virtual ethernet pair and handles all routing/NAT
-# internally.  It works identically regardless of uid.
+# For root, only allow total isolation via veth; --servers and UID=0 dont mix.
+# Simply put: we will use --net=veth for root.  When firejail runs as root,
+# --net=IFACE tries to MOVE the real interface into the sandbox namespace,
+# which fails. --net=veth creates a virtual ethernet pair.
+[ $UID -eq 0 ] && IFACE=veth
+
 [[ -z "$IFACE" ]] && IFACE="$(detect_default_iface)"
 
 cat > "$NFT4" <<'EOF'
@@ -371,7 +378,7 @@ printf 'COMMIT\n' >> "$NFT4"
 printf 'COMMIT\n' >> "$NFT6"
 
 # --net=veth avoids the "move real interface" failure mode for root.
-FJ_NET_ARGS=(--net=veth --netfilter="$NFT4" --netfilter6="$NFT6")
+FJ_NET_ARGS=(--net=$IFACE --netfilter="$NFT4" --netfilter6="$NFT6")
 
 if [[ -n "$DNS_CSV" ]]; then
     IFS=',' read -r -a DNS_ARR <<< "$DNS_CSV"
