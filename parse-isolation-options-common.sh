@@ -22,6 +22,7 @@ PRIVATE_DEV=1
 SERVERS_FILES=()
 RW_PATHS=()
 HIDE_PATHS=()
+APP=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,10 +38,8 @@ while [[ $# -gt 0 ]]; do
         --hide=*)    HIDE_PATHS+=("${1#*=}"); shift ;;
         --host-dev)  PRIVATE_DEV=0; shift ;;
         --help|-h)   usage ;;
-        --)          shift; break ;;
-        -*)          die "unknown option: $1" ;;
-        *)           break ;;
+        --)          shift; APP+=("$@"); break ;;
+        -*)          APP+=("$1"); shift ;;
+        *)           APP+=("$1"); shift ;;
     esac
 done
-
-APP=("$@")

@@ -152,5 +152,12 @@ for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
 [[ -n "$IFACE" ]] && ISOLATE_ARGS+=(--iface "$IFACE")
 (( PRIVATE_DEV )) || ISOLATE_ARGS+=(--host-dev)
 
-isolate.sh "${ISOLATE_ARGS[@]}" \
-    tmux new-session -A -s pi_session_${OUR_RANDOM_PID} "bash -c 'socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline \"\$@\"' -- \"${APP[@]}\""
+APP_ARGS=$(printf '%q ' "${APP[@]}")
+INNER_CMD="socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline $APP_ARGS"
+
+if [[ " ${APP[*]} " == *" -p "* ]]; then
+    isolate.sh "${ISOLATE_ARGS[@]}" bash -c "$INNER_CMD"
+else
+    isolate.sh "${ISOLATE_ARGS[@]}" \
+        tmux new-session -A -s "pi_session_${OUR_RANDOM_PID}" "bash -c '$INNER_CMD'"
+fi
