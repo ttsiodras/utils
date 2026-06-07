@@ -19,7 +19,7 @@ SOCK="$HOME/llama.sock.$OUR_RANDOM_PID"
 die()      { echo "error: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-Usage: pi.local.machine.running.model.sh [--port PORT] [isolate.sh OPTIONS] [-- pi OPTIONS]
+Usage: pi.isolated.sh [--port PORT] [isolate.sh OPTIONS] [-- pi OPTIONS]
 See isolate.sh --help for full isolate.sh option documentation.
 PORT defaults to 8080.
 EOF
@@ -29,14 +29,17 @@ EOF
 # Wrapper-specific: --port for the host-side model endpoint.
 # The inner sandbox socat always listens on 8080; this only changes
 # what the host-side relay (and curl) talk to.
+# --port can appear anywhere in the argument list.
 PORT=8080
+_rest=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --port=*) PORT="${1#*=}"; shift ;;
         --port)  [[ $# -ge 2 ]] || usage; PORT="$2"; shift 2 ;;
-        *)       break ;;
+        *)       _rest+=("$1"); shift ;;
     esac
 done
+set -- "${_rest[@]}"
 
 # Make this point to your locally running model (or SSH-forwarded remote):
 URL=http://127.0.0.1:$PORT
@@ -142,8 +145,6 @@ cat > ~/.pi/agent/models.json << EOF
 EOF
 
 # (b) Launch isolate.sh with internal socat bridge
-# We wrap the command in bash -c to launch socat in the background before npx pi
-#
 ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK")
 for s in "${SERVERS_FILES[@]}"; do ISOLATE_ARGS+=(--servers "$s"); done
 [[ -n "$DNS_CSV" ]] && ISOLATE_ARGS+=(--dns "$DNS_CSV")
@@ -155,7 +156,7 @@ for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
 APP_ARGS=$(printf '%q ' "${APP[@]}")
 INNER_CMD="socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline $APP_ARGS"
 
-if [[ " ${APP[*]} " == *" -p "* ]]; then
+if [[ " ${APP[*]} " == *" -p "* || " ${APP[*]} " == *" --print "* ]]; then
     isolate.sh "${ISOLATE_ARGS[@]}" bash -c "$INNER_CMD"
 else
     isolate.sh "${ISOLATE_ARGS[@]}" \
