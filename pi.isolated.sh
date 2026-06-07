@@ -21,16 +21,16 @@ usage() {
   cat >&2 <<'EOF'
 Usage: pi.isolated.sh [--port PORT] [isolate.sh OPTIONS] [-- pi OPTIONS]
 See isolate.sh --help for full isolate.sh option documentation.
-PORT defaults to 8080.
+PORT defaults to 8081.
 EOF
   exit 2
 }
 
 # Wrapper-specific: --port for the host-side model endpoint.
-# The inner sandbox socat always listens on 8080; this only changes
+# The inner sandbox socat always listens on 8081; this only changes
 # what the host-side relay (and curl) talk to.
 # --port can appear anywhere in the argument list.
-PORT=8080
+PORT=8081
 _rest=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
