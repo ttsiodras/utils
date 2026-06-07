@@ -1,6 +1,14 @@
 #!/bin/bash
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+if [ "$PWD" == "$HOME" ] ; then
+    echo '[!] You run from your $HOME folder. pi.dev/its plugins will be able'
+    echo '[!] to write in your dot files/folders (.bashrc, etc).'
+    echo '[!]'
+    echo '[!] Are you sure? Press Ctrl-c to cancel, otherwise hit ENTER.'
+    read ANS
+fi
+
 # Nastiness.
 #
 # When I use isolate.sh (see last line in this script) - which I HAVE to do,
