@@ -19,7 +19,19 @@ def visit_fs(action):
     Used for both storing a snapshot and comparing against one.
     Calls action with each and every filename in your filesystem.
     """
+    try:
+        exclusions = {
+            x.strip()
+            for x in open(
+                os.path.dirname(os.path.abspath(__file__)) +
+                os.sep +
+                "lost_my_space.exceptions")
+        }
+    except:
+        exclusions = {}
     for pth, dirlist, filelist in os.walk("/"):
+        if any(pth.startswith(x) for x in exclusions):
+            continue
         dirlist[:] = [
             x for x in dirlist
             if not os.path.ismount(pth + os.sep + x)]
