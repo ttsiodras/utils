@@ -7,8 +7,8 @@ echo "  2) ON"
 read -rp "Choice: " guardrails_choice
 
 echo "Model:"
-echo "  1) Gemma4 E4B"
-echo "  2) Qwen3.5 9B"
+echo "  1) Qwen3.5 9B Q4_K_M"
+echo "  2) Gemma4 12B QAT Q4_0 MTP"
 read -rp "Choice: " model_choice
 
 echo "Backend:"
@@ -17,8 +17,8 @@ echo "  2) ROCM"
 read -rp "Choice: " backend_choice
 
 case $model_choice in
-  1) MODEL_ARGS="$GEMMA_ARGS" ;;
-  2) MODEL_ARGS="$QWEN_ARGS" ;;
+  1) MODEL_ARGS="$QWEN_ARGS" ;;
+  2) MODEL_ARGS="$GEMMA_ARGS" ;;
   *) echo "[!] Invalid model choice"; exit 1 ;;
 esac
 

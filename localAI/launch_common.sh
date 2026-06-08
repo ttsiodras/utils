@@ -24,9 +24,9 @@ GEMMA_ARGS="
   --ctx-size 32768
   --temp 1.0
   --min-p 0.05
-  --top-k 64
   --top-p 0.95
   --parallel 1
+  --top-k 64
 "
 # --no-mmproj
 
