@@ -125,7 +125,57 @@ sleep 1
 
 mkdir -p ~/.pi/agent/
 
-cat > ~/.pi/agent/models.json << EOF
+if [[ "$MODEL_ID" == *"deepseek-v4-flash"* ]]; then
+  echo "[+] Detected deepseek-v4-flash: using embedded ds4 config"
+  cat > ~/.pi/agent/models.json << 'EMBEDDED_DS4'
+{
+  "providers": {
+    "local-vllm": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "dummy",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false,
+        "thinkingFormat": "deepseek",
+        "requiresReasoningContentOnAssistantMessages": true
+      },
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "name": "deepseek-v4-flash (local vllm)",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh"
+          },
+          "input": [
+            "text"
+          ],
+          "contextWindow": 326144,
+          "maxTokens": 326144,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
+EMBEDDED_DS4
+else
+  cat > ~/.pi/agent/models.json << EOF
 {
   "providers": {
     "local-vllm": {
@@ -151,6 +201,7 @@ cat > ~/.pi/agent/models.json << EOF
   }
 }
 EOF
+fi
 
 # (b) Launch isolate.sh with internal socat bridge
 ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK")
