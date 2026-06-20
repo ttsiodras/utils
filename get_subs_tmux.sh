@@ -23,6 +23,11 @@ yt-dlp.sh --write-auto-subs --write-subs --sub-langs="en" --sub-format "vtt" --s
 F="$(/bin/ls subs*vtt | head -1)"
 [ -z "$F" ] && { echo "[-] No subs*vtt found..."; exit 1; }
 
+# Convert VTT to clean text
+python3 vtt2text.py "$F"
+TXT_F="${F%.vtt}.txt"
+[ ! -f "$TXT_F" ] && { echo "[-] Failed to convert $F to text"; exit 1; }
+
 # Kill old session if it exists
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
@@ -36,7 +41,7 @@ tmux split-window -v -t "$SESSION:0" -p 90 -c "$SCRIPT_DIR"
 tmux send-keys -t "$SESSION:0.1" "tail -f subs.log.txt" C-m
 
 # Top pane (pane 0): main pipeline, running pi. Issues with pi/docker/newlines are hacked-around by tee :-)
-tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$F and give me a 5-10 paragraph summary, making sure you dont miss the important points\" \
+tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$TXT_F and give me a 5-10 paragraph summary, making sure you dont miss the important points\" \
     | stdbuf -o0 -e0 tee -a subs.log.json \
     | python3 -u ./pi_parse_stream.py \
     | stdbuf -o0 -e0 tee -a subs.log.txt" C-m
