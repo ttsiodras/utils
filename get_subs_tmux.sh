@@ -1,16 +1,14 @@
 #!/bin/bash
 # 
 # This script downloads the en- subtitles of a Youtube video,
-# and uses an LLM (via the pi harness) to summarize it in 5 paragraphs.
-#
-# Allows me to quickly decide whether to watch a video or not.
+# and launches an interactive pi session to summarize it.
 #
 set -e
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd "${SCRIPT_DIR}" || exit 1
 
-SESSION="subs_session"
+SESSION="subs_interactive"
 
 # Drop previous sub data
 rm -f subs.en* subs.log.{txt,json}
@@ -23,26 +21,33 @@ yt-dlp.sh --write-auto-subs --write-subs --sub-langs="en" --sub-format "vtt" --s
 F="$(/bin/ls subs*vtt | head -1)"
 [ -z "$F" ] && { echo "[-] No subs*vtt found..."; exit 1; }
 
+# Convert VTT to clean text
+python3 vtt2text.py "$F"
+TXT_F="${F%.vtt}.txt"
+[ ! -f "$TXT_F" ] && { echo "[-] Failed to convert $F to text"; exit 1; }
+
 # Kill old session if it exists
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 # Create new tmux session (detached)
 tmux new-session -d -s "$SESSION" -c "$SCRIPT_DIR"
 
-# Split window vertically (creates bottom pane with 90% of screen space)
-tmux split-window -v -t "$SESSION:0" -p 90 -c "$SCRIPT_DIR"
+# Launch pi interactively in the pane.
+# We mirror the docker configuration from pi.google_run.sh but remove --mode json and -p
+# to enter the interactive TUI mode.
+PI_CMD="source ai.google.key && \
+    docker run -w \$PWD --rm -v \$PWD:\$PWD \
+    -e NODE_NO_READLINE=1 -e FORCE_COLOR=1 \
+    -e GOOGLE_AI_STUDIO_API_KEY=\$KEY -e GEMINI_API_KEY=\$KEY \
+    -it pi pi --model gemma-4-31b-it"
 
-# Bottom pane (pane 1): log follower
-tmux send-keys -t "$SESSION:0.1" "tail -f subs.log.txt" C-m
+tmux send-keys -t "$SESSION" "$PI_CMD" C-m
 
-# Top pane (pane 0): main pipeline, running pi. Issues with pi/docker/newlines are hacked-around by tee :-)
-tmux send-keys -t "$SESSION:0.0" "./pi.google_run.sh \"Read file @$F and give me a 5-10 paragraph summary, making sure you dont miss the important points\" \
-    | stdbuf -o0 -e0 tee -a subs.log.json \
-    | python3 -u ./pi_parse_stream.py \
-    | stdbuf -o0 -e0 tee -a subs.log.txt" C-m
+# Give it a few seconds to start up and be ready for input
+sleep 3
 
-# Focus bottom pane
-tmux select-pane -t "$SESSION:0.1"
+# Send the initial summary request
+tmux send-keys -t "$SESSION" "Read file @$TXT_F and give me a 5-10 paragraph summary, making sure you dont miss the important points" C-m
 
 # Attach to session
 tmux attach -t "$SESSION"
