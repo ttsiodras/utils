@@ -18,6 +18,7 @@ import hashlib
 
 AbsPath = bytes
 HashResult = Optional[str]
+ScanRow = Tuple[AbsPath, bytes, int, float]  # (abs_path, filename, sz, mtime)
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +26,7 @@ HashResult = Optional[str]
 # ---------------------------------------------------------------------------
 
 def compute_md5(filepath: AbsPath) -> HashResult:
+    """Return the MD5 hex digest of *filepath*, or None on I/O error."""
     hasher = hashlib.md5(usedforsecurity=False)
     try:
         with open(filepath, "rb") as f:
@@ -38,6 +40,7 @@ def compute_md5(filepath: AbsPath) -> HashResult:
 def stream_md5s(
     paths: List[AbsPath], ncores: int
 ) -> Generator[Tuple[AbsPath, HashResult], None, None]:
+    """Yield (abs_path, md5_or_None) as each worker finishes."""
     if not paths:
         return
     with ProcessPoolExecutor(max_workers=ncores) as executor:
@@ -51,6 +54,7 @@ def stream_md5s(
 # ---------------------------------------------------------------------------
 
 def levenshtein(a: str, b: str) -> int:
+    """Return the edit distance between strings *a* and *b*."""
     if len(a) < len(b):
         a, b = b, a
     prev = list(range(len(b) + 1))
@@ -77,6 +81,7 @@ class BKTree:
         self._children: List[Dict[int, int]] = []
 
     def add(self, word: str) -> None:
+        """Insert *word* into the tree (duplicates are ignored)."""
         if not self._words:
             self._words.append(word)
             self._children.append({})
@@ -115,6 +120,7 @@ class BKTree:
 # ---------------------------------------------------------------------------
 
 def open_syncer_db(db_path: str) -> sqlite3.Connection:
+    """Open syncer.db, creating the files table and md5 index if needed."""
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -147,12 +153,11 @@ def load_syncer_db(
 
 def upsert_syncer(
     conn: sqlite3.Connection,
-    full_path: AbsPath,
-    filename: bytes,
-    filesize: int,
-    mtime: float,
+    row: ScanRow,
     md5: HashResult,
 ) -> None:
+    """Insert or update one (abs_path, filename, size, mtime) row + md5."""
+    full_path, filename, filesize, mtime = row
     conn.execute(
         '''INSERT INTO files (full_path, filename, filesize, mtime, md5)
            VALUES (?, ?, ?, ?, ?)
@@ -169,9 +174,7 @@ def upsert_syncer(
 # Scan new folder
 # ---------------------------------------------------------------------------
 
-def scan_new_folder(
-    top_folder: AbsPath,
-) -> List[Tuple[AbsPath, bytes, int, float]]:
+def scan_new_folder(top_folder: AbsPath) -> List[ScanRow]:
     """Return list of (abs_path, filename, filesize, mtime)."""
     results = []
     count = 0
@@ -196,26 +199,30 @@ def scan_new_folder(
 # Phase 1: idempotent MD5 update of syncer.db
 # ---------------------------------------------------------------------------
 
-def update_syncer_db(
-    conn: sqlite3.Connection,
-    top_folder: AbsPath,
-    ncores: int,
-) -> None:
-    fs_files = scan_new_folder(top_folder)
-    db_rows = load_syncer_db(conn)
-
-    to_hash: List[Tuple[AbsPath, bytes, int, float]] = []
-    for abs_path, filename, filesize, mtime in fs_files:
+def select_rows_to_hash(
+    fs_files: List[ScanRow],
+    db_rows: Dict[AbsPath, Tuple[bytes, int, float, HashResult]],
+) -> List[ScanRow]:
+    """Return scan rows that are new, changed (size/mtime), or unhashed."""
+    to_hash: List[ScanRow] = []
+    for row in fs_files:
+        abs_path, _filename, filesize, mtime = row
         existing = db_rows.get(abs_path)
         if existing is None:
-            to_hash.append((abs_path, filename, filesize, mtime))
-        else:
-            _fn, _sz, db_mtime, db_md5 = existing
-            if db_mtime != mtime or filesize != _sz or db_md5 is None:
-                to_hash.append((abs_path, filename, filesize, mtime))
+            to_hash.append(row)
+        elif existing[2] != mtime or existing[1] != filesize \
+                or existing[3] is None:
+            to_hash.append(row)
+    return to_hash
 
-    # Remove DB rows for files no longer on disk
-    fs_paths: Set[AbsPath] = {r[0] for r in fs_files}
+
+def delete_stale_rows(
+    conn: sqlite3.Connection,
+    fs_files: List[ScanRow],
+    db_rows: Dict[AbsPath, Tuple[bytes, int, float, HashResult]],
+) -> None:
+    """Drop syncer.db rows whose files no longer exist on disk."""
+    fs_paths: Set[AbsPath] = {row[0] for row in fs_files}
     deleted = [p for p in db_rows if p not in fs_paths]
     if deleted:
         conn.executemany('DELETE FROM files WHERE full_path = ?',
@@ -223,24 +230,34 @@ def update_syncer_db(
         conn.commit()
         print(f"[-] Removed {len(deleted)} stale entries from syncer.db")
 
+
+def update_syncer_db(
+    conn: sqlite3.Connection,
+    top_folder: AbsPath,
+    ncores: int,
+) -> None:
+    """Idempotently refresh syncer.db: hash new/changed files, drop stale."""
+    fs_files = scan_new_folder(top_folder)
+    db_rows = load_syncer_db(conn)
+
+    to_hash = select_rows_to_hash(fs_files, db_rows)
+    delete_stale_rows(conn, fs_files, db_rows)
+
     if not to_hash:
         print("[-] syncer.db is already up to date")
         return
 
-    path_meta: Dict[AbsPath, Tuple[bytes, int, float]] = {
-        r[0]: (r[1], r[2], r[3]) for r in to_hash
-    }
-    total = len(path_meta)
+    by_path: Dict[AbsPath, ScanRow] = {row[0]: row for row in to_hash}
+    total = len(by_path)
     count = 0
-    for abs_path, md5 in stream_md5s(list(path_meta), ncores):
+    for abs_path, md5 in stream_md5s(list(by_path), ncores):
         count += 1
-        filename, filesize, mtime = path_meta[abs_path]
         if md5 is None:
             print(f"[!] Could not read: {abs_path.decode('utf-8', 'replace')}")
         else:
             print(f"[-] {count}/{total} "
                   f"{abs_path.decode('utf-8', 'replace')}")
-        upsert_syncer(conn, abs_path, filename, filesize, mtime, md5)
+        upsert_syncer(conn, by_path[abs_path], md5)
         conn.commit()
 
     print(f"[-] syncer.db updated: {count} files hashed")
@@ -250,9 +267,18 @@ def update_syncer_db(
 # Phase 2: cross-reference against indexer.db
 # ---------------------------------------------------------------------------
 
-def load_indexer_db(
-    indexer_db_path: str,
-) -> List[Tuple[bytes, bytes, bytes, int, HashResult]]:
+OldRow = Tuple[bytes, bytes, bytes, int, HashResult]
+NewRow = Tuple[AbsPath, bytes, int, str]
+
+
+def to_str(data: object) -> str:
+    """Decode bytes to a printable str; pass through anything already str."""
+    if isinstance(data, bytes):
+        return data.decode('utf-8', 'replace')
+    return str(data)
+
+
+def load_indexer_db(indexer_db_path: str) -> List[OldRow]:
     """Return list of (top_folder, full_path, filename, filesize, md5)."""
     conn = sqlite3.connect(f"file:{indexer_db_path}?mode=ro", uri=True)
     try:
@@ -264,90 +290,132 @@ def load_indexer_db(
         conn.close()
 
 
+def load_new_files(conn: sqlite3.Connection) -> List[NewRow]:
+    """Return new-folder rows with a non-NULL md5 from syncer.db."""
+    cursor = conn.execute(
+        'SELECT full_path, filename, filesize, md5 FROM files '
+        'WHERE md5 IS NOT NULL'
+    )
+    return list(cursor)
+
+
+def write_already_existing(
+    new_files: List[NewRow],
+    old_rows: List[OldRow],
+    already_existing_path: str,
+) -> Set[AbsPath]:
+    """Write new files whose (filesize, md5) match an indexer.db entry.
+
+    Returns the set of new abs paths that were matched, so the similar
+    pass can skip them.
+    """
+    old_by_size_md5: Dict[Tuple[int, str], Tuple[bytes, bytes]] = {}
+    for top_folder, full_path, _filename, filesize, md5 in old_rows:
+        if md5 is None:
+            continue
+        old_by_size_md5.setdefault((filesize, md5), (top_folder, full_path))
+
+    already_existing: Set[AbsPath] = set()
+    with open(already_existing_path, 'w',
+              encoding='utf-8', errors='replace') as fout:
+        for full_path, _filename, filesize, md5 in new_files:
+            match = old_by_size_md5.get((filesize, md5))
+            if match is not None:
+                already_existing.add(full_path)
+                old_abs = os.path.join(to_str(match[0]), to_str(match[1]))
+                fout.write(f"{to_str(full_path)}###{old_abs}\n")
+
+    print(f"[-] already_existing.txt: {len(already_existing)} files")
+    return already_existing
+
+
+StemIndex = Dict[str, List[Tuple[bytes, bytes, int]]]
+
+
+def index_old_by_stem(old_rows: List[OldRow]) -> StemIndex:
+    """Map lowercased filename stem -> [(top_folder, full_path, size), ...]."""
+    old_by_stem: StemIndex = {}
+    for top_folder, full_path, filename, filesize, _md5 in old_rows:
+        stem = os.path.splitext(to_str(filename))[0].lower()
+        old_by_stem.setdefault(stem, []).append(
+            (top_folder, full_path, filesize))
+    return old_by_stem
+
+
+def build_bktree(stems: List[str]) -> BKTree:
+    """Build a BK-tree over *stems*."""
+    print(f"[-] Building BK-tree over {len(stems)} unique stems ...")
+    bk = BKTree()
+    for stem in stems:
+        bk.add(stem)
+    print("[-] BK-tree ready")
+    return bk
+
+
+def similar_lines_for(
+    new_row: NewRow,
+    bk: BKTree,
+    old_by_stem: StemIndex,
+    max_distance: int,
+) -> List[str]:
+    """Return similar.txt lines pairing one new file with close old names."""
+    new_abs = to_str(new_row[0])
+    filesize = new_row[2]
+    new_stem = os.path.splitext(to_str(new_row[1]))[0].lower()
+    threshold = max(1, int(len(new_stem) * max_distance / 100))
+    lines: List[str] = []
+    for matched_stem, _dist in bk.search(new_stem, threshold):
+        for old_top, old_rel, old_size in old_by_stem[matched_stem]:
+            if max(old_size, filesize) > 10 * max(1, min(old_size, filesize)):
+                continue
+            old_abs = os.path.join(to_str(old_top), to_str(old_rel))
+            lines.append(f"{old_abs}####{new_abs}####{old_size}:{filesize}\n")
+    return lines
+
+
+def write_similar(
+    new_files: List[NewRow],
+    old_rows: List[OldRow],
+    already_existing: Set[AbsPath],
+    similar_path: str,
+    max_distance: int,
+) -> None:
+    """Write Levenshtein-close filename pairs not already matched by md5."""
+    old_by_stem = index_old_by_stem(old_rows)
+    bk = build_bktree(list(old_by_stem))
+
+    similar_count = 0
+    with open(similar_path, 'w', encoding='utf-8', errors='replace') as fout:
+        for new_row in new_files:
+            if new_row[0] in already_existing:
+                continue
+            for line in similar_lines_for(
+                    new_row, bk, old_by_stem, max_distance):
+                fout.write(line)
+                similar_count += 1
+
+    print(f"[-] similar.txt: {similar_count} candidate pairs")
+
+
 def cross_reference(
     conn: sqlite3.Connection,
     indexer_db_path: str,
-    new_top_folder: AbsPath,
     already_existing_path: str,
     similar_path: str,
     max_distance: int,
 ) -> None:
-    # Load syncer.db entries (new folder)
-    cursor = conn.execute(
-        'SELECT full_path, filename, filesize, md5 FROM files WHERE md5 IS NOT NULL'
-    )
-    new_files: List[Tuple[AbsPath, bytes, int, str]] = list(cursor)
-
-    # Build lookup: (filesize, md5) -> list of new file abs_paths
-    new_by_size_md5: Dict[Tuple[int, str], List[AbsPath]] = {}
-    for full_path, filename, filesize, md5 in new_files:
-        key = (filesize, md5)
-        new_by_size_md5.setdefault(key, []).append(full_path)
-
+    """Cross-reference syncer.db against indexer.db into the two reports."""
+    new_files = load_new_files(conn)
     print(f"[-] Loaded {len(new_files)} new-folder entries from syncer.db")
 
-    # Load indexer.db
     print(f"[-] Loading indexer.db from {indexer_db_path} ...")
     old_rows = load_indexer_db(indexer_db_path)
     print(f"[-] Loaded {len(old_rows)} entries from indexer.db")
 
-    # Build lookup: (filesize, md5) -> list of old (top_folder, full_path)
-    old_by_size_md5: Dict[Tuple[int, str], List[Tuple[bytes, bytes]]] = {}
-    for top_folder, full_path, filename, filesize, md5 in old_rows:
-        if md5 is None:
-            continue
-        key = (filesize, md5)
-        old_by_size_md5.setdefault(key, []).append((top_folder, full_path))
-
-    # --- already_existing: new files whose (size, md5) appear in indexer.db ---
-    already_existing: Set[AbsPath] = set()
-    with open(already_existing_path, 'w', encoding='utf-8', errors='replace') as fout:
-        for full_path, filename, filesize, md5 in new_files:
-            key = (filesize, md5)
-            if key in old_by_size_md5:
-                already_existing.add(full_path)
-                old_top, old_rel = old_by_size_md5[key][0]
-                old_top_s = old_top.decode('utf-8', 'replace') if isinstance(old_top, bytes) else old_top
-                old_rel_s = old_rel.decode('utf-8', 'replace') if isinstance(old_rel, bytes) else old_rel
-                old_abs = os.path.join(old_top_s, old_rel_s)
-                fout.write(f"{full_path.decode('utf-8', 'replace')}###{old_abs}\n")
-
-    print(f"[-] already_existing.txt: {len(already_existing)} files")
-
-    # --- similar: Levenshtein-close filenames, not already existing ---
-    # Build old filename stem -> list of (top_folder, full_path, filesize, original_fname)
-    old_by_stem: Dict[str, List[Tuple[bytes, bytes, int, str]]] = {}
-    for top_folder, full_path, filename, filesize, md5 in old_rows:
-        fname_str = filename.decode('utf-8', 'replace') if isinstance(filename, bytes) else filename
-        stem = os.path.splitext(fname_str)[0].lower()
-        old_by_stem.setdefault(stem, []).append((top_folder, full_path, filesize, fname_str))
-
-    # Build BK-tree over lowercased stems (built once, queried per new file)
-    print(f"[-] Building BK-tree over {len(old_by_stem)} unique stems ...")
-    bk: BKTree = BKTree()
-    for stem in old_by_stem:
-        bk.add(stem)
-    print("[-] BK-tree ready")
-
-    similar_count = 0
-    with open(similar_path, 'w', encoding='utf-8', errors='replace') as fout:
-        for full_path, filename, filesize, md5 in new_files:
-            if full_path in already_existing:
-                continue
-            new_fname = filename.decode('utf-8', 'replace') if isinstance(filename, bytes) else filename
-            new_stem = os.path.splitext(new_fname)[0].lower()
-            threshold = max(1, int(len(new_stem) * max_distance / 100))
-            new_abs = full_path.decode('utf-8', 'replace')
-            for matched_stem, _dist in bk.search(new_stem, threshold):
-                for old_top, old_rel, old_size, _orig in old_by_stem[matched_stem]:
-                    old_top_s = old_top.decode('utf-8', 'replace') if isinstance(old_top, bytes) else old_top
-                    old_rel_s = old_rel.decode('utf-8', 'replace') if isinstance(old_rel, bytes) else old_rel
-                    old_abs = os.path.join(old_top_s, old_rel_s)
-                    if max(old_size, filesize) <= 10 * max(1, min(old_size, filesize)):
-                        fout.write(f"{old_abs}####{new_abs}####{old_size}:{filesize}\n")
-                        similar_count += 1
-
-    print(f"[-] similar.txt: {similar_count} candidate pairs")
+    already_existing = write_already_existing(
+        new_files, old_rows, already_existing_path)
+    write_similar(
+        new_files, old_rows, already_existing, similar_path, max_distance)
 
 
 # ---------------------------------------------------------------------------
@@ -355,18 +423,20 @@ def cross_reference(
 # ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the syncer."""
     parser = argparse.ArgumentParser(
-        description='Sync new folder MD5s and cross-reference against indexer.db'
+        description='Sync new folder MD5s and cross-reference indexer.db'
     )
     parser.add_argument('new_folder', help='New folder to scan')
-    parser.add_argument('indexer_db', help='Path to existing indexer.db (files.db)')
+    parser.add_argument(
+        'indexer_db', help='Path to existing indexer.db (files.db)')
     parser.add_argument(
         '--syncer-db', default='syncer.db',
         help='Path to syncer.db (default: syncer.db in current folder)',
     )
     parser.add_argument(
         '--already-existing', default='already_existing.txt',
-        help='Output file for already-existing files (default: already_existing.txt)',
+        help='Output for already-existing files (default: %(default)s)',
     )
     parser.add_argument(
         '--similar', default='similar.txt',
@@ -378,7 +448,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '-d', '--max-distance', type=int, default=20,
-        help='Max Levenshtein distance as %% of filename stem length (default: 20)',
+        help='Max Levenshtein distance as %% of stem length (default: 20)',
     )
     parser.add_argument(
         '--skip-scan', action='store_true',
@@ -388,6 +458,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Entry point: run Phase 1 (scan) then Phase 2 (cross-reference)."""
     args = parse_args()
     ncores = args.ncores if (args.ncores is not None and args.ncores > 0) \
         else (os.cpu_count() or 1)
@@ -410,7 +481,6 @@ def main() -> None:
         cross_reference(
             conn,
             args.indexer_db,
-            new_top,
             args.already_existing,
             args.similar,
             args.max_distance,
