@@ -16,10 +16,6 @@ COMMON_ARGS="
   --mlock
 "
 
-# --spec-draft-hf RachidAR/gemma-4-12B-it-qat-q4_0-MTP-assistant-gguf:Q4_0
-# --spec-type draft-mtp
-# --spec-draft-n-max 1
-
 GEMMA_ARGS="
   --hf-repo google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0
   --ctx-size 32768
