@@ -138,7 +138,7 @@ ffmpeg \
     -hwaccel_output_format vaapi \
     -i "$1" \
     -c:v hevc_vaapi \
-    -qp 28 \
+    -qp 31 \
     -c:a copy \
     -noautoscale \
     "$TARGET"
