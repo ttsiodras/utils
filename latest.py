@@ -43,7 +43,7 @@ def main():
         optlist, args = getopt.gnu_getopt(
             args, "hlmac", [
                 'help', 'nosymlink', 'mtime', 'atime', 'ctime'])
-    except:
+    except Exception:
         usage()
 
     timemode = "st_mtime"
@@ -101,7 +101,7 @@ def main():
                         si = statdata.st_size
                         completeList[timestamp].append((fullpath, si))
                         maxSize = max(maxSize, si)
-                except:
+                except Exception:
                     pass
 
         span = len(str(maxSize))
