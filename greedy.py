@@ -15,7 +15,7 @@ def main():
         try:
             key = int(key)
             data.append(key)
-        except:
+        except Exception:
             print("%s is not numeric" % key)
             continue
 
