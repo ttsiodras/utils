@@ -9,5 +9,5 @@ column = int(sys.argv[1])
 for line in sys.stdin.readlines():
     try:
         print(line.strip().split()[column])
-    except:
+    except Exception:
         pass
