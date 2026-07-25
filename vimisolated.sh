@@ -158,15 +158,34 @@ abs_no_resolve() {
     fi
 }
 
+# Rewrite each file/dir argument to a full path as we go, and collect them
+# into RESOLVED_VIM_ARGS. This matters because PWD itself may have been
+# reached via a symlink: relative args resolved against such a PWD (or an
+# absolute-but-symlinked PWD) produce a path that isolate.sh never mapped
+# with --rw (which always uses realpath). Passing the resolved path instead
+# guarantees vim is handed something that lives under a directory we
+# actually made writable.
+RESOLVED_VIM_ARGS=()
 for arg in "${VIM_ARGS[@]+"${VIM_ARGS[@]}"}"; do
-    # Skip vim options and +cmd arguments
-    [[ "$arg" == -* || "$arg" == +* ]] && continue
-    # Skip anything that doesn't exist on disk
-    [[ -e "$arg" ]] || continue
+    # Pass vim options and +cmd arguments through unchanged
+    if [[ "$arg" == -* || "$arg" == +* ]]; then
+        RESOLVED_VIM_ARGS+=("$arg")
+        continue
+    fi
+
+    if [[ ! -e "$arg" ]]; then
+        # Doesn't exist yet (e.g. a new file to create). Still normalize to
+        # a full path -- realpath -m resolves symlinks in whatever prefix
+        # of the path does exist, without requiring the target itself to.
+        RESOLVED_VIM_ARGS+=("$(realpath -m "$arg")")
+        continue
+    fi
 
     if [[ -d "$arg" ]]; then
-        # Directory: make it writable directly
-        add_rw "$(realpath "$arg")"
+        # Directory: make it writable directly, and pass the resolved path
+        real_dir_arg="$(realpath "$arg")"
+        add_rw "$real_dir_arg"
+        RESOLVED_VIM_ARGS+=("$real_dir_arg")
     else
         # File: find both where the symlink lives and where the real file is.
 
@@ -185,8 +204,12 @@ for arg in "${VIM_ARGS[@]+"${VIM_ARGS[@]}"}"; do
         if [[ "$link_dir" != "$real_dir" ]]; then
             add_rw "$link_dir"
         fi
+
+        # Hand vim the fully resolved path, matching what was mapped above
+        RESOLVED_VIM_ARGS+=("$real_file")
     fi
 done
+VIM_ARGS=("${RESOLVED_VIM_ARGS[@]+"${RESOLVED_VIM_ARGS[@]}"}")
 
 # Pick the next `vim` on PATH that isn't this script (so a symlink named
 # `vim` pointing here doesn't cause infinite recursion).
