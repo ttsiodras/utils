@@ -13,7 +13,7 @@ read -rp "Choice: " model_choice
 
 echo "Backend:"
 echo "  1) Vulkan"
-echo "  2) ROCM"
+#echo "  2) ROCM"
 read -rp "Choice: " backend_choice
 
 case $model_choice in
