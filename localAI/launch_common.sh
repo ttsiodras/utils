@@ -37,6 +37,7 @@ QWEN_ARGS="
   --top-k 20
   --top-p 0.95
   --parallel 1
+  --image-min-tokens 1024
 "
 
 # Half the pp/s, 8.6 => 6.2 tg/s
