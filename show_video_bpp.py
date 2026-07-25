@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
-
+import shlex
 
 def computeRate(input_video):
     keys = [
@@ -11,9 +11,9 @@ def computeRate(input_video):
         'ID_AUDIO_BITRATE',
         'ID_VIDEO_FPS']
     values = {}
-    for line in os.popen(
-            "mplayer -identify -frames 0 -vo null \"%s\" 2>/dev/null" %
-            input_video).readlines():
+    cmd = "mplayer -identify -frames 0 -vo null {} 2>/dev/null"
+    cmd += cmd.format(shlex.quote(input_video))
+    for line in os.popen(cmd).readlines():
         for key in keys:
             if line.startswith(key):
                 try:
