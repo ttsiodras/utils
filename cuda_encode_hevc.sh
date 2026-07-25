@@ -8,7 +8,7 @@ ffmpeg \
     -cq 31 \
     -preset p4 \
     -rc-lookahead 20 \
-    -spatial_aq 1 \
+    -spatial-aq 1 \
     -c:a aac \
     -b:a 128k \
     "$1".HEVC.mp4

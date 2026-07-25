@@ -6,12 +6,11 @@ ffmpeg \
     -i "$1" \
     -c:v av1_nvenc \
     -preset p5 \
-    -cq 35 \
+    -cq 39 \
     -rc-lookahead 32 \
     -spatial-aq 1 \
     -temporal-aq 1 \
     -multipass fullres \
     -highbitdepth 1 \
-    -c:a aac \
-    -b:a 128k \
-    "$1".AV1.mp4
+    -c:a copy \
+    "$1".AV1.HEVC.mp4

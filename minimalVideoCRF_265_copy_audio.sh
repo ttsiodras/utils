@@ -10,6 +10,7 @@ if lscpu 2>/dev/null | grep -qi 'GB10'; then
 fi
 
 $PREFIX ffmpeg \
+    -nostdin \
     -i "$1" \
     -c:v libx265 -crf 26 -preset fast \
     $X265OPTS \
