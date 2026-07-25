@@ -281,7 +281,12 @@ fi
 
 REAL_HOME="$(realpath "$HOME")"
 
-FJ_FS_ARGS=(--private-tmp --read-only="$REAL_HOME")
+# --allusers: firejail hides every home directory under /home except our
+# own by default (bind-mounts them empty) -- this is hardcoded firejail
+# setup, not a profile rule; so it still applies under --noprofile. Without
+# it, --read-write (and even read access) on another user's directory
+# silently fails even though normal Unix permissions would allow it.
+FJ_FS_ARGS=(--allusers --private-tmp --read-only="$REAL_HOME")
 (( PRIVATE_DEV )) && FJ_FS_ARGS=(--private-dev "${FJ_FS_ARGS[@]}")
 
 for p in "${RW_PATHS[@]+"${RW_PATHS[@]}"}"; do
