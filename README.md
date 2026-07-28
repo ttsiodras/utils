@@ -134,7 +134,7 @@ that is *definitely* recommended :-)
 | [`latest.sh`](latest.sh) | Bash-only poor-mans-version of latest.py |
 | [`exclude.sh`](exclude.sh) | Interactively filter lines from a file by regex (used with `latest.py`) |
 | [`excludeFilter.sh`](excludeFilter.sh) | Same, but via stdin pipe |
-| [`greedy.py`](greedy.py) | Greedy file/directory size analyzer |
+| [`greedy.py`](greedy.py) | Pack files to maximally fit a target size |
 | [`lost_my_space.py`](lost_my_space.py) | Find what's consuming disk space in a filesystem |
 | [`lost_my_space.sh`](lost_my_space.sh) | Bash wrapper |
 | [`logDurations.py`](logDurations.py) | Parse timestamped logs and show duration of each run |
@@ -143,7 +143,6 @@ that is *definitely* recommended :-)
 | [`csvToHTML_barebones.py`](csvToHTML_barebones.py) | CSV → minimal HTML table |
 | [`excelToCsv.py`](excelToCsv.py) | Convert Excel (.xls/.xlsx) to CSV |
 | [`countMoviesLength.py`](countMoviesLength.py) | Sum total duration of video files in a folder |
-| [`vidir`](vidir) | Edit directory contents via temp file (like vim) |
 | [`rmdirRecursive.sh`](rmdirRecursive.sh) | Remove all empty directories recursively (post-cleanup) |
 | [`inlineDataInHTML.sh`](inlineDataInHTML.sh) | Generate data: URI for embedding files in HTML |
 | [`nocolor.sh`](nocolor.sh) | Strip ANSI color codes from pipe |
