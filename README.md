@@ -29,6 +29,24 @@ that is *definitely* recommended :-)
 | [`dockerClearRunningContainersAndNoneImages.sh`](dockerClearRunningContainersAndNoneImages.sh) | Nuke all containers and `<none>` images |
 | [`parse-isolation-options-common.sh`](parse-isolation-options-common.sh) | Shared argument parser for isolate.sh / pi.isolated.sh (sourced, not standalone) |
 
+Example usage of isolation (vimisolated.sh is much better, but this works as a basic example:
+
+```bash
+# Read-only $HOME, no network
+isolate.sh -- vim ~/bin/pi.sh
+
+# Allow specific servers, make some paths writable, hide SSH keys from any vim-spawned subprocesses (Language servers, etc)
+isolate.sh --rw ~/bin --rw ~/.viminfo --hide ~/.ssh \
+           --servers servers.txt --dns 1.1.1.1 -- vim ~/bin/pi.sh
+```
+
+Example usage of isolated pi.dev harness:
+
+```bash
+# Assumes a local LLM at localhost:8081
+pi.isolated.sh [--port PORT] [isolate.sh options] [-- pi options]
+```
+
 ### File indexing & syncing
 
 | Script | What it does |
@@ -39,12 +57,24 @@ that is *definitely* recommended :-)
 | [`cmpDir1andDir2andRemoveIdenticalFromDir1`](cmpDir1andDir2andRemoveIdenticalFromDir1) | Remove from dir1 files that are identical (size+MD5) in dir2 |
 | [`cmpDir1andDir2andRemoveIdenticalFromDir1BasedOnSizeAndTimestamp`](cmpDir1andDir2andRemoveIdenticalFromDir1BasedOnSizeAndTimestamp) | Same, but uses size + timestamp (faster, no MD5) |
 
+Example usage:
+
+```bash
+# Scan folders, store MD5s
+indexer.py /mnt/photos
+```
+
 ### Duplicate detection
 
 | Script | What it does |
 |---|---|
 | [`find_dup_videos.py`](find_dup_videos.py) | Detect duplicate videos by duration + perceptual hash (imagehash) |
 | [`find_dup_images.py`](find_dup_images.py) | Find duplicate images via perceptual hashing |
+
+```bash
+# Requires ffmpeg/ffprobe + python3 -m pip install ImageHash pillow
+find_dup_videos.py /path/to/videos/
+```
 
 ### Video related
 
@@ -104,6 +134,14 @@ that is *definitely* recommended :-)
 | [`barChartTimes.sh`](barChartTimes.sh) | Horizontal bar chart of execution times (from `time` output) |
 | [`performance`](performance) | Performance tuning wrapper |
 | [`ondemand`](ondemand) | CPU governor toggle (ondemand vs performance) |
+
+```bash
+# Colored stats
+for i in {1..100}; do echo $i; done | stats.py
+
+# Histogram
+cat numbers.txt | histogram.py
+```
 
 ### Networking
 
@@ -241,66 +279,6 @@ that is *definitely* recommended :-)
 | [`yq_outliers.sh`](yq_outliers.sh) | Flatten YAML to dot-notation for grepping |
 | [`x16.py`](x16.py) | GDB helper: dump 16-column memory (vs default 8) |
 | [`unchroot.pl`](unchroot.pl) | Break out of a chroot jail (security testing) |
-
----
-
-## Usage patterns
-
-### Sandboxing with `isolate.sh`
-
-The centerpiece of the toolbox — uses firejail to run applications with fine-grained
-network and filesystem isolation:
-
-```bash
-# Read-only $HOME, no network
-isolate.sh -- vim ~/bin/pi.sh
-
-# Allow specific servers, make some paths writable, hide SSH keys
-isolate.sh --rw ~/bin --rw ~/.viminfo --hide ~/.ssh \
-           --servers servers.txt --dns 1.1.1.1 -- vim ~/bin/pi.sh
-```
-
-### Running `pi` (AI coding agent) sandboxed
-
-```bash
-# Assumes a local LLM at localhost:8081
-pi.sh [--port PORT] [isolate.sh options] [-- pi options]
-```
-
-The script tunnels through a Unix socket to reach the host's localhost from inside
-the firejail network namespace.
-
-### Duplicate video detection
-
-```bash
-# Requires ffmpeg/ffprobe + python3 -m pip install ImageHash pillow
-find_dup_videos.py /path/to/videos/
-```
-
-### File indexing
-
-```bash
-# Scan folders, store MD5s
-indexer.py /mnt/photos
-
-# Cross-reference a new folder against an existing index
-syncer.py /mnt/new_photos /mnt/photos/indexer.db
-```
-
-### Statistics from piped data
-
-```bash
-# Colored stats
-for i in {1..100}; do echo $i; done | stats.py
-
-# Live streaming stats
-for i in {1..10}; do echo $i; sleep 1; done | statsLive.py 5
-
-# Histogram
-cat numbers.txt | histogram.py
-```
-
----
 
 ## Dependencies
 
