@@ -232,10 +232,8 @@ that is *definitely* recommended :-)
 | [`bcmp.sh`](bcmp.sh) | Binary compare two files (shows offset + hex bytes) |
 | [`setSubtract.pl`](setSubtract.pl) | Subtract one list of strings from another |
 | [`setUnversionedToSVNignore.sh`](setUnversionedToSVNignore.sh) | Mark all `?` files as svn:ignore |
-| [`viewISS.sh`](viewISS.sh) | Watch ISS live stream via YouTube |
 | [`USB_drives_need_no_sleep.py`](USB_drives_need_no_sleep.py) | Keep USB drives awake (prevent spin-down on ZFS server) |
 | [`loopaesmount.py`](loopaesmount.py) | Mount loopback AES-encrypted containers |
-| [`importSnapshotWithSikuli.sh`](importSnapshotWithSikuli.sh) | Screenshot via Sikuli (Java automation) |
 | [`pulseaudio_record.sh`](pulseaudio_record.sh) | Record PulseAudio output to OGG |
 | [`sync_music_to_android_with_m3u_for_folder_symlinks.sh`](sync_music_to_android_with_m3u_for_folder_symlinks.sh) | Sync music to Android with .m3u playlist files |
 | [`mergefs_show_realpath.sh`](mergefs_show_realpath.sh) | Show mergerfs real path for files |
