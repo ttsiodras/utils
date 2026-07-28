@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
-Detect duplicate videos in a directory based on duration and perceptual hash.
-Uses ffmpeg and ffprobe.
+Detect duplicate videos, via duration-checking and perceptual hash matching.
+
+Supports two modes:
+  - Normal mode (default): filters candidates by similar duration, uses only
+    front perceptual hash.
+  - Deep mode  (--deep):  ignores durations entirely; computes both front and
+    back phashes for every video; compares front-front and back-back to catch
+    duplicates even when one video is cropped at the beginning (or end).  For
+    the back phash, specifically, instead of seeking to a relative percentage
+    of the video (which would land at different absolute content when durations
+    differ), it uses an absolute offset from the end. This means two videos
+    that end with the same content will produce the same back phash even if one
+    has additional footage at the beginning.
 
 Quickstart:
 
@@ -10,8 +21,11 @@ Quickstart:
     python3 -m venv .venv
     . .venv/bin/activate
     python3 -m pip install ImageHash pillow
-    /path/to/find_dup_videos.py /path/to/videos/
+    ./find_dup_videos.py /path/to/videos/          # normal (duration-filtered)
+    ./find_dup_videos.py --deep /path/to/videos/   # deep (no duration filter)
 
+Database note:
+    Uses video_index.db to cache metadata and both phashes across runs.
 """
 
 import os
@@ -25,7 +39,7 @@ import tempfile
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import combinations
-from typing import List, Dict, Optional, NamedTuple
+from typing import List, Dict, Optional, NamedTuple, Tuple
 import imagehash
 from PIL import Image, ImageStat
 
@@ -35,16 +49,25 @@ from PIL import Image, ImageStat
 # ----------------------------------------------------------------------
 CLEAR_TO_EOL = "\x1b[K"  # ANSI escape: clear from cursor to end of line
 
+DB_NAME = "video_index.db"
+MIN_SIZE_BYTES = 5 * 1024 * 1024
+DURATION_TOLERANCE = 3.0          # seconds (normal mode only)
+HASH_DISTANCE_TOLERANCE = 10
+BLACK_PIXEL_THRESHOLD = 10
+FAST_HASH_BYTES = 1 * 1024 * 1024
+MAX_OFFSET_SECONDS = 20
+BACK_OFFSET_FROM_END = 30         # seconds before end to start back-phash scan
+CPU_COUNT = os.cpu_count() or 1
+
+
+# ----------------------------------------------------------------------
+# Helper utilities
+# ----------------------------------------------------------------------
+
 
 def truncate_path(path: Path, max_len: int) -> str:
-    """Truncate path for display, showing the end (filename) with '...' prefix.
-
-    Args:
-        path: Path to truncate.
-        max_len: Maximum display length in characters.
-
-    Returns:
-        Truncated path string, or full path if it fits.
+    """
+    Truncate path for display, showing the end (filename) with '...' prefix.
     """
     path_str = str(path)
     if len(path_str) <= max_len:
@@ -52,90 +75,8 @@ def truncate_path(path: Path, max_len: int) -> str:
     return "..." + path_str[-(max_len - 3):]
 
 
-# ----------------------------------------------------------------------
-# Named tuples for structured data
-# ----------------------------------------------------------------------
-class VideoFile(NamedTuple):
-    """Video file metadata: path, size in bytes, and modification time."""
-    path: Path
-    size: int
-    mtime: float
-
-
-class VideoProbeResult(NamedTuple):
-    """Result of probing a video file."""
-    path: Path
-    size: int
-    mtime: float
-    checksum: Optional[str]
-
-
-class VideoPair(NamedTuple):
-    """Pair of videos with similar durations."""
-    path1: Path
-    duration1: float
-    path2: Path
-    duration2: float
-
-
-class VideoMatch(NamedTuple):
-    """Pair of videos that appear to be duplicates."""
-    path1: Path
-    path2: Path
-
-
-class HashTask(NamedTuple):
-    """Task for computing a video hash."""
-    path: Path
-    duration: float
-
-
-class CachedVideoData(NamedTuple):
-    """Cached video metadata from the database."""
-    size: int
-    mtime: float
-    checksum: Optional[str]
-
-
-class VideoDuration(NamedTuple):
-    """Video path and duration from database."""
-    path: Path
-    duration: float
-
-
-# ----------------------------------------------------------------------
-# Configuration constants
-# ----------------------------------------------------------------------
-DB_NAME = "video_index.db"
-MIN_SIZE_BYTES = 5 * 1024 * 1024
-DURATION_TOLERANCE = 3.0          # seconds
-HASH_DISTANCE_TOLERANCE = 10
-BLACK_PIXEL_THRESHOLD = 10
-FAST_HASH_BYTES = 1 * 1024 * 1024
-MAX_OFFSET_SECONDS = 20
-CPU_COUNT = os.cpu_count() or 1
-
-# ----------------------------------------------------------------------
-# Helper utilities
-# ----------------------------------------------------------------------
-
-
 def fast_checksum(path: Path) -> Optional[str]:
-    """Return the MD5 of the first ``FAST_HASH_BYTES`` of a file.
-
-    This provides a quick id for the content without reading the entire file.
-
-    Args:
-        path: Path to the file to checksum.
-
-    Returns:
-        Hexadecimal MD5 hash string of the first 1MB of the file,
-        or ``None`` on I/O error.
-
-    Example:
-        >>> fast_checksum(Path("video.mp4"))
-        'deadc0de0badbeefdeadc0de0badbeef'
-    """
+    """Return the MD5 of the first ``FAST_HASH_BYTES`` of a file."""
     try:
         with path.open("rb") as f:
             data = f.read(FAST_HASH_BYTES)
@@ -146,29 +87,7 @@ def fast_checksum(path: Path) -> Optional[str]:
 
 
 def run_ffprobe(filepath: Path) -> Optional[float]:
-    """Probe a video file to extract its duration using ``ffprobe``.
-
-    Args:
-        filepath: Path to the video file to probe.
-
-    Returns:
-        A tuple of ``(filepath, duration)`` where duration is in seconds.
-        Returns ``(filepath, None)`` if the file cannot be probed or parsed.
-
-    Note:
-        Uses ``ffprobe``:
-
-        -v error — sets log level to only show errors, suppressing the usual
-                   ffprobe banner/info noise
-        -show_entries format=duration — tells ffprobe to extract only
-                   the duration field from the format section (as opposed to
-                   stream-level metadata)
-        -of default=noprint_wrappers=1:nokey=1 — controls output formatting:
-
-            default = use the default (key=value) output format
-            noprint_wrappers=1 = don't print headers like [FORMAT] / [/FORMAT]
-            nokey=1 = don't print key name (duration=), just the bare value
-    """
+    """Probe a video file to extract its duration using ``ffprobe``."""
     cmd = [
         "ffprobe", "-v", "error",
         "-show_entries", "format=duration",
@@ -196,26 +115,11 @@ def run_ffprobe(filepath: Path) -> Optional[float]:
 
 
 def extract_frame(video: Path, timestamp: float, out_path: Path) -> bool:
-    """Extract a single frame from a video at a specific timestamp.
-
-    Uses ``ffmpeg`` to extract one high-quality JPEG frame
-    at the given timestamp.
-
-    Args:
-        video: Path to the source video file.
-        timestamp: Time in seconds where the frame should be extracted.
-        out_path: Path where the extracted frame will be saved.
-
-    Returns:
-        ``True`` if extraction succeeded, ``False`` otherwise.
-
-    Note:
-        The output image is saved as a high-quality JPEG (``-q:v 2``).
-    """
+    """Extract a single frame from a video at a specific timestamp."""
     cmd = [
         "ffmpeg", "-y",
         "-nostdin",
-        "-loglevel", "error",  # or "quiet"
+        "-loglevel", "error",
         "-ss", f"{timestamp}",
         "-i", str(video),
         "-frames:v", "1",
@@ -259,84 +163,143 @@ def is_black_image(image_path: Path) -> bool:
         return True
 
 
-def compute_phash(video: Path, duration: float) -> Optional[str]:
-    """Compute a perceptual hash (phash) for a video file.
+def _extract_phash_from_frame(frame_path: Path) -> Optional[str]:
+    """Open a frame image and return its perceptual hash hex string."""
+    try:
+        with Image.open(frame_path) as img:
+            return str(imagehash.phash(img))
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
 
-    Extracts frames starting at ``duration * 0.2`` (20% into the video) and
-    iterates with 1-second offsets up to ``MAX_OFFSET_SECONDS`` (20s). Returns
-    the phash of the first non-black frame found.
 
-    Perceptual hashes allow comparison of visual similarity between videos
-    regardless of exact pixel content.
+# ----------------------------------------------------------------------
+# Perceptual hash computation — front and back
+# ----------------------------------------------------------------------
 
-    Args:
-        video: Path to the video file to hash.
-        duration: Duration of the video in seconds
-                  (used to calculate starting offset).
 
-    Returns:
-        Hexadecimal perceptual hash string (e.g., ``'d3adc0de0badbeef'``),
-        or ``None`` if no suitable frame was found.
+def compute_phash_front(video: Path, duration: float) -> Optional[str]:
+    """Compute a perceptual hash from near the beginning of a video.
 
-    Algorithm:
-        1. Start at timestamp = duration * 0.2
-        2. Extract frame and check if it's black (luminance < 10)
-        3. If not black, compute and return phash
-        4. If black, try next offset (timestamp + 1 second)
-        5. Repeat until MAX_OFFSET_SECONDS or end of video
+    Starts at ``duration * 0.2`` and steps forward looking for the first
+    non-black frame, up to ``MAX_OFFSET_SECONDS`` (20s) of searching.
 
-    Example:
-        >>> compute_phash(Path("video.mp4"), 31.4159)
-        'd3adc0de0badbeef'
+    Returns the phash hex string, or ``None`` on failure.
     """
     with tempfile.TemporaryDirectory() as td:
         frame_path = Path(td) / "frame.jpg"
         base_ts = duration * 0.2
-        for offset in range(min(int(duration), MAX_OFFSET_SECONDS)):
+        limit = min(int(duration), MAX_OFFSET_SECONDS)
+        for offset in range(limit):
             ts = base_ts + offset
             if ts >= duration:
                 break
             if not extract_frame(video, ts, frame_path):
                 continue
             if not is_black_image(frame_path):
-                try:
-                    with Image.open(frame_path) as img:
-                        return str(imagehash.phash(img))
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass  # fall through to error message
-    print(f"\n[!] Failed to compute perceptual hash for\n[!]\n[!]\t"
-          f"{video}\n[!]\n[!] I/O error, decoding error, or all frames up"
-          f"to MAX_OFFSET_SECONDS ({MAX_OFFSET_SECONDS}) are black.\n[!]")
+                ph = _extract_phash_from_frame(frame_path)
+                if ph:
+                    return ph
+    print(f"\n[!] Failed to compute front phash for\n[!]\n[!]\t"
+          f"{video}\n[!]\n[!] All frames up to MAX_OFFSET_SECONDS "
+          f"({MAX_OFFSET_SECONDS}) are black or unreadable.\n[!]")
     return None
+
+
+def compute_phash_back(video: Path, duration: float) -> Optional[str]:
+    """Compute a perceptual hash from near the end of a video.
+
+    Uses an **absolute offset from the end** (``BACK_OFFSET_FROM_END`` = 30s),
+    NOT a relative percentage. This ensures that two videos which end with the
+    same content produce the same back phash even if one has extra footage at
+    the beginning.
+
+    Starts at ``max(0, duration - BACK_OFFSET_FROM_END)`` and steps forward
+    looking for the first non-black frame, up to ``MAX_OFFSET_SECONDS`` (20s)
+    of searching.
+
+    Returns the phash hex string, or ``None`` on failure.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        frame_path = Path(td) / "frame.jpg"
+        base_ts = max(0.0, duration - BACK_OFFSET_FROM_END)
+        max_steps = min(int(duration - base_ts), MAX_OFFSET_SECONDS)
+        for offset in range(max_steps):
+            ts = base_ts + offset
+            if ts >= duration:
+                break
+            if not extract_frame(video, ts, frame_path):
+                continue
+            if not is_black_image(frame_path):
+                ph = _extract_phash_from_frame(frame_path)
+                if ph:
+                    return ph
+    print(f"\n[!] Failed to compute back phash for\n[!]\n[!]\t"
+          f"{video}\n[!]\n[!] All frames near the end (last "
+          f"{BACK_OFFSET_FROM_END}s) are black or unreadable.\n[!]")
+    return None
+
+
+# ----------------------------------------------------------------------
+# Named tuples for structured data
+# ----------------------------------------------------------------------
+
+
+class VideoFile(NamedTuple):
+    """Video file metadata: path, size in bytes, and modification time."""
+    path: Path
+    size: int
+    mtime: float
+
+
+class VideoProbeResult(NamedTuple):
+    """Result of probing a video file."""
+    path: Path
+    size: int
+    mtime: float
+    checksum: Optional[str]
+
+
+class VideoPair(NamedTuple):
+    """Pair of videos with similar durations."""
+    path1: Path
+    duration1: float
+    path2: Path
+    duration2: float
+
+
+class VideoMatch(NamedTuple):
+    """Pair of videos that appear to be duplicates."""
+    path1: Path
+    path2: Path
+
+
+class CachedVideoData(NamedTuple):
+    """Cached video metadata from the database."""
+    size: int
+    mtime: float
+    checksum: Optional[str]
+
+
+class VideoDuration(NamedTuple):
+    """Video path and duration from database."""
+    path: Path
+    duration: float
 
 
 # ----------------------------------------------------------------------
 # Database helpers
 # ----------------------------------------------------------------------
+
+
 def init_db(conn: sqlite3.Connection) -> None:
-    """Initialize the database by creating the ``videos`` table
-       if it doesn't exist.
-
-    Creates a table to store video metadata including path, duration,
-    perceptual hash, file size, modification time, and checksum.
-
-    Args:
-        conn: Active SQLite database connection.
-
-    Table Schema:
-        - ``path`` (TEXT PRIMARY KEY): Absolute path to the video file
-        - ``duration`` (REAL): Video duration in seconds
-        - ``phash`` (TEXT): Perceptual hash for similarity detection
-        - ``size`` (INTEGER): File size in bytes
-        - ``mtime`` (REAL): File modification timestamp
-        - ``checksum`` (TEXT): MD5 of first 1MB of file content
-    """
+    """Initialize the database, creating tables if they don't exist."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS videos (
             path TEXT PRIMARY KEY,
             duration REAL,
             phash TEXT,
+            phash_back TEXT,
             size INTEGER,
             mtime REAL,
             checksum TEXT
@@ -345,28 +308,17 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
 
+    # Migrate: add phash_back column if missing (for DBs created by older
+    # versions of this script, or carried over from the original script).
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN phash_back TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
 
 def collect_files(root: Path) -> List[VideoFile]:
-    """Recursively collect candidate video files from a directory tree.
-
-    Scans the directory tree for files that meet the minimum size threshold
-    (``MIN_SIZE_BYTES`` = 5MB). Skips symbolic links and known library folder.
-
-    Args:
-        root: Root directory to scan for video files.
-
-    Returns:
-        List of ``VideoFile`` named tuples with path, size, and mtime.
-
-    Filters:
-        - Files smaller than ``MIN_SIZE_BYTES`` (5MB) are ignored
-        - Symbolic links are skipped
-        - Paths containing ``/library/`` or ``audio.HEVC.mp4`` are excluded
-
-    Progress:
-        Displays "Collecting files: N found" during scanning.
-    """
-
+    """Recursively collect candidate video files from a directory tree."""
     video_extensions = {
         "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv",
         "f4v", "f4p", "f4a", "f4b", "3gp", "3g2", "mpg", "mpeg",
@@ -397,7 +349,6 @@ def collect_files(root: Path) -> List[VideoFile]:
                 files.append(VideoFile(p, st.st_size, st.st_mtime))
         except OSError:
             continue
-        # progress update
         sys.stdout.write(f"\r[-] Collecting files: {len(files)} found")
         sys.stdout.flush()
     if processed:
@@ -406,21 +357,9 @@ def collect_files(root: Path) -> List[VideoFile]:
 
 
 def cleanup_deleted(
-    conn: sqlite3.Connection,
-    present: List[VideoFile],
+    conn: sqlite3.Connection, present: List[VideoFile]
 ) -> None:
-    """Remove database entries for files that no longer exist on disk.
-
-    Compares the list of currently present files against the database and
-    deletes any records for files that have been removed.
-
-    Args:
-        conn: Active SQLite database connection.
-        present: List of ``VideoFile`` named tuples.
-
-    Note:
-        This ensures the database stays in sync with the filesystem state.
-    """
+    """Remove database entries for files that no longer exist on disk."""
     present_set = {str(vf.path) for vf in present}
     cur = conn.execute("SELECT path FROM videos")
     for (path,) in cur:
@@ -429,29 +368,21 @@ def cleanup_deleted(
     conn.commit()
 
 
+# ----------------------------------------------------------------------
+# Parallel ffprobe (shared between normal and deep mode)
+# ----------------------------------------------------------------------
+
+
 def parallel_ffprobe(  # pylint: disable=too-many-locals
     files: List[VideoFile],
     conn: sqlite3.Connection,
 ) -> None:
     """Probe video durations using parallel ``ffprobe`` execution.
 
-    For each file, checks if metadata has changed (size, mtime, or checksum).
-    If changed, runs ``ffprobe`` in parallel to get the duration and updates
-    the database. Uses a process pool with ``CPU_COUNT`` workers.
-
-    Args:
-        files: List of ``VideoFile`` named tuples.
-        conn: Active SQLite database connection.
-
-    Optimization:
-        - Skips files with unchanged metadata (uses cached values)
-        - Only recomputes checksum if size or mtime changed
-        - Parallel processing for I/O bound ffprobe operations
-
-    Progress:
-        Displays "Reading video metadata: N/M" during execution.
+    Only probes files whose (size, mtime, checksum) has changed.
+    Stores results in the database with phash and phash_back set to NULL
+    (they are filled in later by the hash computation step).
     """
-    # Load cached metadata from the DB
     cached: Dict[str, CachedVideoData] = {
         row[0]: CachedVideoData(row[1], row[2], row[3])
         for row in conn.execute(
@@ -462,7 +393,6 @@ def parallel_ffprobe(  # pylint: disable=too-many-locals
     to_probe: List[VideoProbeResult] = []
     for vf in files:
         old = cached.get(str(vf.path))
-        # Re-compute checksum only if size or mtime changed
         checksum = (
             fast_checksum(vf.path)
             if not old or (vf.size, vf.mtime) != (old.size, old.mtime)
@@ -491,8 +421,8 @@ def parallel_ffprobe(  # pylint: disable=too-many-locals
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO videos
-                    (path, duration, phash, size, mtime, checksum)
-                    VALUES (?, ?, NULL, ?, ?, ?)
+                    (path, duration, phash, phash_back, size, mtime, checksum)
+                    VALUES (?, ?, NULL, NULL, ?, ?, ?)
                     """,
                     (str(result.path), duration,
                      result.size, result.mtime, result.checksum),
@@ -507,29 +437,13 @@ def parallel_ffprobe(  # pylint: disable=too-many-locals
     conn.commit()
 
 
-def find_candidates(
-    conn: sqlite3.Connection,
-) -> List[VideoPair]:
-    """Find pairs of videos with similar durations.
+# ----------------------------------------------------------------------
+# Candidate & hash logic — Normal mode
+# ----------------------------------------------------------------------
 
-    Compares all video pairs and returns those whose durations differ by
-    at most ``DURATION_TOLERANCE`` (3.0 seconds). Videos with similar
-    durations are candidates for being duplicates.
 
-    Args:
-        conn: Active SQLite database connection.
-
-    Returns:
-        List of ``VideoPair`` named tuples where
-        ``abs(duration1 - duration2) <= DURATION_TOLERANCE``.
-
-    Note:
-        Uses a self-join pattern in Python. For very large collections,
-        consider implementing this as a SQL self-join for better performance.
-
-    Complexity:
-        O(n²) where n is the number of videos in the database.
-    """
+def find_candidates(conn: sqlite3.Connection) -> List[VideoPair]:
+    """Find pairs of videos with similar durations (normal mode only)."""
     print("[-] Computing candidate videos based on durations...")
     rows = [
         VideoDuration(Path(row[0]), row[1])
@@ -542,104 +456,80 @@ def find_candidates(
     ]
 
 
-def compute_hashes(  # pylint: disable=too-many-locals
+def compute_phash_front_for_videos(  # pylint: disable=too-many-locals
     conn: sqlite3.Connection,
-    candidates: List[VideoPair],
+    needed: Dict[Path, float],
+    label: str,
 ) -> None:
-    """Compute perceptual hashes for videos that lack them.
-
-    Processes all videos appearing in the candidate list. Only computes hashes
-    for videos that don't already have them in the database. Uses parallel
-    processing with ``CPU_COUNT`` workers for CPU-intensive phash computation.
+    """Compute front phashes for videos that lack them.
 
     Args:
-        conn: Active SQLite database connection.
-        candidates: List of ``VideoPair`` named tuples.
-
-    Algorithm:
-        1. Collect all unique videos from candidates that lack phashes
-        2. Submit phash computation tasks to process pool
-        3. Store results in database as they complete
-
-    Progress:
-        Displays "Perceptual-hashing candidate videos: N/M" during execution.
-
-    Note:
-        Uses dict mapping to ensure correct path-hash pairing despite
-        parallel execution order.
+        conn: Database connection.
+        needed: Dict mapping video path -> duration for videos needing phashes.
+        label: Progress label (e.g., "front" or "back").
     """
-    needed: Dict[Path, float] = {
-        p: d
-        for vp in candidates
-        for p, d in [(vp.path1, vp.duration1), (vp.path2, vp.duration2)]
-    }
-    existing: Dict[str, str] = {
+    existing: Dict[str, Optional[str]] = {
         row[0]: row[1]
-        for row in conn.execute(
-            "SELECT path, phash FROM videos"
-        )
+        for row in conn.execute("SELECT path, phash FROM videos")
     }
 
     tasks = [
-        HashTask(p, d)
+        (p, d)
         for p, d in needed.items()
         if not existing.get(str(p))
     ]
     total = len(tasks)
     processed = 0
     terminal_width = shutil.get_terminal_size().columns
+
     with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
         futures = {
-            executor.submit(compute_phash, t.path, t.duration): t
-            for t in tasks
+            executor.submit(compute_phash_front, path, dur): (path, dur)
+            for path, dur in tasks
         }
         for fut in as_completed(futures):
             processed += 1
-            task = futures[fut]
+            path, _ = futures[fut]
             phash = fut.result()
             if phash:
                 conn.execute(
                     "UPDATE videos SET phash = ? WHERE path = ?",
-                    (phash, str(task.path)),
+                    (phash, str(path)),
                 )
-            prefix = "\r[-] Perceptual-hashing candidate videos: "
-            prefix += f"{processed}/{total} "
+            prefix = f"\r[-] {label}: {processed}/{total} "
             max_path_len = terminal_width - len(prefix) - 10
-            path_str = truncate_path(task.path, max_path_len)
+            path_str = truncate_path(path, max_path_len)
             print(f"{prefix}{path_str}{CLEAR_TO_EOL}", end="", flush=True)
     if total:
-        print(f"\r[-] Perceptual-hashing candidate videos: "
-              f"{total}/{total}{CLEAR_TO_EOL}", end="", flush=True)
+        print(f"\r[-] {label}: "
+              f"{total}/{total}{CLEAR_TO_EOL}", flush=True)
     print()
     conn.commit()
 
 
-def find_matches(
+def compute_hashes_normal(
+    conn: sqlite3.Connection,
+    candidates: List[VideoPair],
+) -> None:
+    """Compute front phashes for all candidate-list videos (normal mode)."""
+    needed: Dict[Path, float] = {
+        p: d
+        for vp in candidates
+        for p, d in [(vp.path1, vp.duration1), (vp.path2, vp.duration2)]
+    }
+    compute_phash_front_for_videos(
+        conn, needed, "Perceptual-hashing candidate videos"
+    )
+
+
+def find_matches_normal(
     conn: sqlite3.Connection,
     candidates: List[VideoPair],
 ) -> List[VideoMatch]:
-    """Find pairs of videos with similar perceptual hashes.
-
+    """Find matches by comparing front phashes for each candidate pair.
     Checks each candidate pair (videos with similar durations) to see if their
-    perceptual hashes are within ``HASH_DISTANCE_TOLERANCE`` (10). Returns
-    pairs that are likely visual duplicates.
-
-    Args:
-        conn: Active SQLite database connection.
-        candidates: List of ``VideoPair`` named tuples.
-
-    Returns:
-        List of ``VideoMatch`` named tuples where both videos have perceptual
-        hashes within ``HASH_DISTANCE_TOLERANCE`` of each other.
-
-    Algorithm:
-        1. Load all video hashes from database into memory
-        2. For each candidate pair, compare their phashes
-        3. Return pairs where hamming distance <= ``HASH_DISTANCE_TOLERANCE``
-
-    Note:
-        The perceptual hash comparison uses imagehash's built-in distance
-        calculation (hamming distance between hash bit patterns).
+    perceptual hashes are within ``HASH_DISTANCE_TOLERANCE`` (currently 10).
+    Returns pairs that are likely visual duplicates.
     """
     hash_map = {
         row[0]: row[1]
@@ -658,58 +548,179 @@ def find_matches(
 
 
 # ----------------------------------------------------------------------
+# Hash & match logic — Deep mode
+# ----------------------------------------------------------------------
+
+
+def compute_hashes_deep(
+    conn: sqlite3.Connection,
+) -> None:
+    """Compute both front AND back phashes for ALL videos that lack them.
+
+    In deep mode, every video needs both hashes so we can compare both
+    F-F and B-B combinations without any duration pre-filtering.
+    """
+    rows = list(conn.execute(
+        "SELECT path, duration, phash, phash_back FROM videos"
+    ))
+
+    # Separate out which videos need front and/or back hashes
+    front_needed: Dict[Path, float] = {}
+    back_needed: Dict[Path, float] = {}
+
+    for path_str, duration, phash, phash_back in rows:
+        p = Path(path_str)
+        if not phash:
+            front_needed[p] = duration
+        if not phash_back:
+            back_needed[p] = duration
+
+    if front_needed:
+        compute_phash_front_for_videos(
+            conn, front_needed, "Hashing front (deep)"
+        )
+    else:
+        print("[-] All front phashes already cached (deep mode).")
+
+    if back_needed:
+        _compute_phash_back_for_videos(
+            conn, back_needed, "Hashing back (deep)"
+        )
+    else:
+        print("[-] All back phashes already cached (deep mode).")
+
+
+def _compute_phash_back_for_videos(
+    conn: sqlite3.Connection,
+    needed: Dict[Path, float],
+    label: str,
+) -> None:
+    """Compute back phashes for videos that lack them (helper for deep mode).
+
+    Runs in parallel, updating the ``phash_back`` column in the database.
+    """
+    total = len(needed)
+    processed = 0
+    terminal_width = shutil.get_terminal_size().columns
+
+    with ProcessPoolExecutor(max_workers=CPU_COUNT) as executor:
+        futures = {
+            executor.submit(compute_phash_back, path, dur): (path, dur)
+            for path, dur in needed.items()
+        }
+        for fut in as_completed(futures):
+            processed += 1
+            path, _ = futures[fut]
+            phash = fut.result()
+            if phash:
+                conn.execute(
+                    "UPDATE videos SET phash_back = ? WHERE path = ?",
+                    (phash, str(path)),
+                )
+            prefix = f"\r[-] {label}: {processed}/{total} "
+            max_path_len = terminal_width - len(prefix) - 10
+            path_str = truncate_path(path, max_path_len)
+            print(f"{prefix}{path_str}{CLEAR_TO_EOL}", end="", flush=True)
+    if total:
+        print(f"\r[-] {label}: "
+              f"{total}/{total}{CLEAR_TO_EOL}", flush=True)
+    print()
+    conn.commit()
+
+
+def find_matches_deep(conn: sqlite3.Connection) -> List[VideoMatch]:
+    # pylint: disable=too-many-locals
+    """Find duplicate pairs by comparing front-front and back-back phashes,
+    with NO duration pre-filtering.
+
+    For every pair of videos, two comparisons are made:
+        A.front - B.front     catches same beginning (extra footage at end)
+        A.back  - B.back      catches same ending (extra footage at start)
+
+    If EITHER distance is <= HASH_DISTANCE_TOLERANCE, the pair is reported as
+    a match.
+    """
+    print("[-] Comparing all video pairs (deep mode, no duration filter)...")
+
+    rows = list(conn.execute(
+        "SELECT path, phash, phash_back FROM videos"
+    ))
+
+    # Build a lookup: path -> (front_hash, back_hash)
+    # Skip videos missing both hashes
+    video_hashes: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    for path_str, ph, ph_back in rows:
+        if ph or ph_back:
+            video_hashes[path_str] = (ph, ph_back)
+
+    paths = list(video_hashes.keys())
+    total_pairs = len(paths) * (len(paths) - 1) // 2
+    checked = 0
+    matches: List[VideoMatch] = []
+
+    for p1_str, p2_str in combinations(paths, 2):
+        checked += 1
+        if checked % 500 == 0 or checked == total_pairs:
+            print(f"\r[-] Compared {checked}/{total_pairs} pairs"
+                  f"{CLEAR_TO_EOL}", end="", flush=True)
+
+        h1_front, h1_back = video_hashes[p1_str]
+        h2_front, h2_back = video_hashes[p2_str]
+
+        is_match = False
+
+        # F - F  — same beginning (catches extra footage at end)
+        if h1_front and h2_front:
+            d = (imagehash.hex_to_hash(h1_front) -
+                 imagehash.hex_to_hash(h2_front))
+            if d <= HASH_DISTANCE_TOLERANCE:
+                is_match = True
+
+        # B - B  — same ending (catches extra footage at start)
+        if not is_match and h1_back and h2_back:
+            d = (imagehash.hex_to_hash(h1_back) -
+                 imagehash.hex_to_hash(h2_back))
+            if d <= HASH_DISTANCE_TOLERANCE:
+                is_match = True
+
+        if is_match:
+            matches.append(VideoMatch(Path(p1_str), Path(p2_str)))
+
+    if total_pairs:
+        print(f"\r[-] Compared {total_pairs}/{total_pairs} pairs"
+              f"{CLEAR_TO_EOL}", flush=True)
+    print()
+    return matches
+
+
+# ----------------------------------------------------------------------
 # Main entry point
 # ----------------------------------------------------------------------
+
+
 def main() -> None:
-    """Main entry point for the duplicate video detection script.
+    """Main entry point.
 
-    Orchestrates the full duplicate detection pipeline:
-        1. Parse command-line arguments
-        2. Initialize database
-        3. Collect video files from target directory
-        4. Clean up entries for deleted files
-        5. Probe video durations (parallel)
-        6. Find duration-based candidates
-        7. Compute perceptual hashes (parallel)
-        8. Find matching duplicates
-        9. Output duplicate pairs
-
-    Command Line:
-        Usage: find_dup_videos.py <folder>
-
-        Arguments:
-            folder: Path to the directory tree to scan for duplicate videos.
-
-    Output:
-        Prints duplicate video pairs in the format:
-        ``<path1>\n\t<path2>``
-
-    Database:
-        Uses ``video_index.db`` in the current working directory.
-        The database is created if it doesn't exist and persists
-        metadata across runs for incremental updates.
-
-    Example:
-        $ python3 find_dup_videos.py /home/user/videos
-        [-] Collecting files: 1779 found
-        [-] Reading video metadata: 1779/1779
-        [-] Computing candidate videos based on durations...
-        [-] Perceptual-hashing candidate videos: 1495/1495
-
-        [-] Duplicates detected:
-
-        /home/user/videos/Xmas-2019/baby.mp4
-            /home/user/videos/backup/Xmas-2019/baby.mp4
-
-        ...
-
+    Two modes:
+      - Normal (default): same as the original find_dup_videos.py
+      - Deep (--deep):   ignores durations; uses front+back phash on all videos
     """
 
     def parse_args():
         parser = argparse.ArgumentParser(
-            description="Find duplicate videos"
+            description="Find duplicate videos (with optional deep mode)"
         )
         parser.add_argument("folder", help="Folder to scan")
+        parser.add_argument(
+            "--deep", action="store_true",
+            help="Deep mode: ignore video durations, use both front and back "
+                 "perceptual hashes to find duplicates even when one video is "
+                 "cropped at the beginning or end.",
+        )
+        parser.add_argument(
+            "--report", metavar="FILE",
+            help="Write the duplicate list to FILE (plain text, paths only).",
+        )
         return parser.parse_args()
 
     args = parse_args()
@@ -722,22 +733,60 @@ def main() -> None:
     with sqlite3.connect(DB_NAME) as conn:
         init_db(conn)
 
+        # -- Step 1: collect files
         files = collect_files(folder)
         cleanup_deleted(conn, files)
 
+        # -- Step 2: probe durations (always needed, even in deep mode,
+        #    because duration is used for frame-offset calculations)
         parallel_ffprobe(files, conn)
 
-        candidates = find_candidates(conn)
-        compute_hashes(conn, candidates)
+        if args.deep:
+            # ----------------------------------------------------------------
+            # DEEP MODE: no duration filtering
+            # ----------------------------------------------------------------
+            print("[-] Deep mode enabled — ignoring video durations.")
 
-        matches = find_matches(conn, candidates)
+            # Step 3: compute front AND back phashes for ALL videos
+            compute_hashes_deep(conn)
 
+            # Step 4: compare all pairs using F-F and B-B comparisons
+            matches = find_matches_deep(conn)
+
+        else:
+            # ----------------------------------------------------------------
+            # NORMAL MODE: duration-based candidate filtering
+            # (original behaviour)
+            # ----------------------------------------------------------------
+            candidates = find_candidates(conn)
+            compute_hashes_normal(conn, candidates)
+            matches = find_matches_normal(conn, candidates)
+
+    # -- Output results
     if matches:
         print("[-] Duplicates detected:\n")
         for vm in matches:
             print(f"\n{vm.path1}\n\t{vm.path2}")
+
+        if args.report:
+            report_path = Path(args.report)
+            try:
+                with report_path.open("w", encoding="utf-8") as f:
+                    for vm in matches:
+                        f.write(f"{vm.path1}\n\t{vm.path2}\n\n")
+                print(f"[-] Report written to {report_path}\n")
+            except OSError as e:
+                sys.stderr.write(f"[!] Failed to write report: {e}\n")
     else:
         print("[-] No duplicates detected.\n")
+        if args.report:
+            report_path = Path(args.report)
+            try:
+                with report_path.open("w", encoding="utf-8") as f:
+                    f.write("# No duplicates detected.\n")
+                print(f"[-] Report written to {report_path}\n")
+            except OSError as e:
+                sys.stderr.write(f"[!] Failed to write report: {e}\n")
 
 
 if __name__ == "__main__":
