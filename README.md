@@ -116,7 +116,7 @@ that is *definitely* recommended :-)
 | [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
 | [`nointernet.for.genymotion.sh`](nointernet.for.genymotion.sh) | Block Genymotion VM from internet access |
 | [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | Download YouTube video from clipboard URL |
-| [`yt-dlp.sh`](yt-dlp.sh) | Wrapper around yt-dlp with sensible defaults |
+| [`yt-dlp.sh`](yt-dlp.sh) | Wrapper around Dockerfiles/Dockerfile.yt-dlp container (sandbox the madness) |
 
 ### Subtitle tools
 
