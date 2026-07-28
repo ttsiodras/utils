@@ -199,7 +199,7 @@ that is *definitely* recommended :-)
 | [`epochToHuman.pl`](epochToHuman.pl) | Convert Unix epoch to human date |
 | [`tohex`](tohex) | Decimal → hex |
 | [`todec`](todec) | Hex → decimal |
-| [`tozero.sh`](tozero.sh) | Zero-fill a file/device |
+| [`tozero.sh`](tozero.sh) | feed safely from a pipe to xargs -0 |
 | [`256color.pl`](256color.pl) | Display 256-color terminal palette |
 | [`href.pl`](href.pl) | Extract href links from HTML |
 | [`img.pl`](img.pl) | Extract img src links from HTML |
