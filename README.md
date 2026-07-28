@@ -70,7 +70,7 @@ that is *definitely* recommended :-)
 | [`png2webp.sh`](png2webp.sh) | Convert PNG to WebP via ffmpeg |
 | [`recordX11.sh`](recordX11.sh) | Losslessly compressed X11 screen recording |
 | [`flashVideo.sh`](flashVideo.sh) | Extract flash video from browser plugin's pipe |
-| [`sub_auto_fixer.py`](sub_auto_fixer.py) | Match subtitle files to video files by Dice coefficient + LCS |
+| [`misc.py`](misc.py) | Shared utility module for video scripts |
 
 ### Pi (AI coding agent) helpers
 
@@ -125,6 +125,7 @@ that is *definitely* recommended :-)
 | [`get_subs_tmux.sh`](get_subs_tmux.sh) | Download YouTube subtitles, convert to text, launch interactive pi session to summarize. Symlinked as [`zz`](zz) |
 | [`vtt2text.py`](vtt2text.py) | Convert VTT subtitle files to clean text |
 | [`subrip.sh`](subrip.sh) | Subtitle RIP/conversion utility |
+| [`sub_auto_fixer.py`](sub_auto_fixer.py) | Match subtitle files to video files by Dice coefficient + LCS |
 
 ### File/text utilities
 
@@ -204,9 +205,7 @@ that is *definitely* recommended :-)
 | [`href.pl`](href.pl) | Extract href links from HTML |
 | [`img.pl`](img.pl) | Extract img src links from HTML |
 | [`unescape.pl`](unescape.pl) | Decode URL-encoded (%XX) and HTML entities |
-| [`supergrep.pl`](supergrep.pl) | Advanced grep with line numbers, invert, case-insensitive flags |
 | [`speed.pl`](speed.pl) | Monitor download speed/progress of a file |
-| [`misc.py`](misc.py) | Shared utility module for video scripts |
 
 ### System administration
 
