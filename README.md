@@ -27,6 +27,7 @@ that is *definitely* recommended :-)
 | [`desert_island_container_execution.sh`](desert_island_container_execution.sh) | Run untrusted TCP server code in a Docker container that the host can reach, but the container can't reach outside the LAN |
 | [`dockerme.sh`](dockerme.sh) | Launch a Docker container with the current folder mapped, optional X11/PulseAudio passthrough, network toggle, root toggle |
 | [`dockerClearRunningContainersAndNoneImages.sh`](dockerClearRunningContainersAndNoneImages.sh) | Nuke all containers and `<none>` images |
+| [`parse-isolation-options-common.sh`](parse-isolation-options-common.sh) | Shared argument parser for isolate.sh / pi.isolated.sh (sourced, not standalone) |
 
 ### File indexing & syncing
 
@@ -230,7 +231,6 @@ that is *definitely* recommended :-)
 | [`makeSelfSignedCertificate.sh`](makeSelfSignedCertificate.sh) | Generate self-signed SSL certificate (legacy, use Let's Encrypt instead) |
 | [`bcmp.sh`](bcmp.sh) | Binary compare two files (shows offset + hex bytes) |
 | [`setSubtract.pl`](setSubtract.pl) | Subtract one list of strings from another |
-| [`parse-isolation-options-common.sh`](parse-isolation-options-common.sh) | Shared argument parser for isolate.sh / pi.isolated.sh (sourced, not standalone) |
 | [`setUnversionedToSVNignore.sh`](setUnversionedToSVNignore.sh) | Mark all `?` files as svn:ignore |
 | [`viewISS.sh`](viewISS.sh) | Watch ISS live stream via YouTube |
 | [`USB_drives_need_no_sleep.py`](USB_drives_need_no_sleep.py) | Keep USB drives awake (prevent spin-down on ZFS server) |
