@@ -114,7 +114,6 @@ that is *definitely* recommended :-)
 | [`tcpdump2binary.py`](tcpdump2binary.py) | Extract raw Ethernet frames from a pcap into binary files (uses scapy) |
 | [`myip.sh`](myip.sh) | Show my public IP |
 | [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
-| [`get_geolocation_info.sh`](get_geolocation_info.sh) | Lookup IP geolocation via ipinfo.io |
 | [`kerio.py`](kerio.py) | Generate Kerio VPN client password config
 | [`nointernet.for.genymotion.sh`](nointernet.for.genymotion.sh) | Block Genymotion VM from internet access |
 | [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | Download YouTube video from clipboard URL |
