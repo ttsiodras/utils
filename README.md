@@ -131,7 +131,7 @@ that is *definitely* recommended :-)
 | Script | What it does |
 |---|---|
 | [`latest.py`](latest.py) | List recently modified files in a directory, sorted by timestamp |
-| [`latest.sh`](latest.sh) | Bash wrapper for latest.py |
+| [`latest.sh`](latest.sh) | Bash-only poor-mans-version of latest.py |
 | [`exclude.sh`](exclude.sh) | Interactively filter lines from a file by regex (used with `latest.py`) |
 | [`excludeFilter.sh`](excludeFilter.sh) | Same, but via stdin pipe |
 | [`greedy.py`](greedy.py) | Greedy file/directory size analyzer |
