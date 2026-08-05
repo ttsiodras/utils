@@ -6,6 +6,7 @@ of the movies passed to it in the command line.
 """
 import os
 import sys
+import shlex
 
 from concurrent import futures
 
@@ -13,9 +14,7 @@ from concurrent import futures
 def getMovieLength(filename):
     if not os.path.isfile(os.path.realpath(filename)):
         return filename, 0.
-    cmd = "mplayer -nosound -quiet -identify -frames 0 -vo null "
-    cmd += "\"%s\" 2>/dev/null | grep LENGTH" % filename
-    cmd = 'ffprobe -i "%s" -show_entries format=duration -v quiet -of csv="p=0"' % filename
+    cmd = 'ffprobe -i %s -show_entries format=duration -v quiet -of csv="p=0"' % shlex.quote(filename)
     try:
         return filename, float(os.popen(cmd).readlines()[0].strip())
     except:
