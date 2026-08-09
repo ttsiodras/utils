@@ -98,7 +98,17 @@ def stream_md5s(
         # Map each path to a future to track which path produced which result.
         future_to_path = {executor.submit(compute_md5, p): p for p in paths}
         for future in as_completed(future_to_path):
-            yield future_to_path[future], future.result()
+            path = future_to_path[future]
+            try:
+                md5: HashResult = future.result()
+            except Exception:  # pylint: disable=broad-exception-caught
+                # A worker died for whatever reason (for example OSError,
+                # MemoryError on a huge file, or a BrokenProcessPool from
+                # a killed process). Rather than abort the whole sync,
+                # degrade to the "could not read" path so the caller
+                # marks it for retry on the next run.
+                md5 = None
+            yield path, md5
 
 
 def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
