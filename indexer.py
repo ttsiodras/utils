@@ -135,7 +135,8 @@ def stream_md5s(
                     md5 = None
                 yield item, md5
                 # Refill the window with the next unreached file, if any.
-                if (nxt := next(it, None)) is not None:
+                nxt = next(it, None)
+                if nxt is not None:
                     f = executor.submit(
                         compute_md5,
                         os.path.join(nxt.top_folder, nxt.full_path),
