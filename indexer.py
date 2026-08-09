@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
-File Scanner Script - Scans folders, tracks files in SQLite, supports
-parallel MD5 computation, duplicate-copy limits, and validation reporting.
-
-Vibe-coded; standalone repo with prompts and test suite at:
+File scanner: tracks files in a SQLite database, computes MD5s in parallel,
+and supports duplicate-copy limits (-l) and integrity validation (-v).
 
     https://github.com/ttsiodras/FileIndexer
+
+See the repository README for usage, and the AI.prompts/ folder for the
+prompts used for development. This is an evolving experiment in using
+local AI - gotta say, quite pleased with the result.
+
+Models used so far in building/debugging/improving this code:
+
+- Qwen 3.5 122B
+- GPT OSS 120B
+- Deepseek v4 Flash 0731
 
 """
 import argparse
