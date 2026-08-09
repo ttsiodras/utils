@@ -13,7 +13,8 @@ import hashlib
 import os
 import sqlite3
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from itertools import islice
 from typing import Dict, Generator, List, NamedTuple, Optional, Set, Tuple
 
 
@@ -85,30 +86,51 @@ def compute_md5(filepath: AbsPath) -> HashResult:
 
 
 def stream_md5s(
-    paths: List[AbsPath], ncores: int
+    paths: List[AbsPath], ncores: int,
+    batch: Optional[int] = None,
 ) -> Generator[Tuple[AbsPath, HashResult], None, None]:
     """Yield ``(abs_path, md5_or_None)`` as each worker finishes.
 
     Results arrive in completion order, not submission order, so callers
     can act on each hash immediately without waiting for the full batch.
+
+    Only a bounded window (``batch``) of files is submitted to the pool at
+    a time; as one completes it is yielded and a replacement is submitted.
+    This keeps the number of in-flight futures (and thus parent-process
+    memory) proportional to ``batch`` rather than to the total file count,
+    without changing the per-file commit cadence expected by callers.
     """
     if not paths:
         return
+    if batch is None or batch <= 0:
+        batch = ncores * 8  # default window: a small multiple of workers
     with ProcessPoolExecutor(max_workers=ncores) as executor:
-        # Map each path to a future to track which path produced which result.
-        future_to_path = {executor.submit(compute_md5, p): p for p in paths}
-        for future in as_completed(future_to_path):
-            path = future_to_path[future]
-            try:
-                md5: HashResult = future.result()
-            except Exception:  # pylint: disable=broad-exception-caught
-                # A worker died for whatever reason (for example OSError,
-                # MemoryError on a huge file, or a BrokenProcessPool from
-                # a killed process). Rather than abort the whole sync,
-                # degrade to the "could not read" path so the caller
-                # marks it for retry on the next run.
-                md5 = None
-            yield path, md5
+        it = iter(paths)
+        # Submit an initial bounded window of work. Keep an explicit
+        # future->path map so we can look up the path for each result.
+        future_to_path = {executor.submit(compute_md5, p): p
+                          for p in islice(it, batch)}
+        pending = set(future_to_path)
+        while pending:
+            # Yield results in true completion order, refilling one-for-one.
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                path = future_to_path.pop(future)
+                try:
+                    md5: HashResult = future.result()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    # A worker died for whatever reason (for example OSError,
+                    # MemoryError on a huge file, or a BrokenProcessPool from
+                    # a killed process). Rather than abort the whole sync,
+                    # degrade to the "could not read" path so the caller
+                    # marks it for retry on the next run.
+                    md5 = None
+                yield path, md5
+                # Refill the window with the next unreached file, if any.
+                if (nxt := next(it, None)) is not None:
+                    f = executor.submit(compute_md5, nxt)
+                    future_to_path[f] = nxt
+                    pending.add(f)
 
 
 def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
