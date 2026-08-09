@@ -225,6 +225,7 @@ class FileDB:
         cursor = self.conn.execute('''
             SELECT full_path, md5, COUNT(DISTINCT top_folder) AS copies
             FROM files
+            WHERE md5 IS NOT NULL
             GROUP BY full_path, md5
             HAVING copies < ?''', (limit,))
         return [LimitCheckResult(*row) for row in cursor]
