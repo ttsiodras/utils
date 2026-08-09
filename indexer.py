@@ -574,6 +574,10 @@ def parse_args() -> argparse.Namespace:
         help='Path to report file (default: report.log in current folder)',
     )
     args = parser.parse_args()
+    if args.validate is not None and args.limit is not None:
+        parser.error(
+            "--validate (-v) and --limit (-l) are mutually exclusive; "
+            "run them as separate commands.")
     if args.validate is None and args.limit is None and not args.top_folder:
         parser.print_help()
         sys.exit(1)
