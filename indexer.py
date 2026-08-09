@@ -14,8 +14,9 @@ import os
 import sqlite3
 import sys
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-from itertools import islice
-from typing import Dict, Generator, List, NamedTuple, Optional, Set, Tuple
+from itertools import chain, islice
+from typing import (Dict, Generator, Iterable, List, NamedTuple, Optional,
+                    Set, Tuple)
 
 
 # --- Type aliases ---
@@ -86,13 +87,17 @@ def compute_md5(filepath: AbsPath) -> HashResult:
 
 
 def stream_md5s(
-    paths: List[AbsPath], ncores: int,
+    items: Iterable[FileMetadata],
+    ncores: int,
     batch: Optional[int] = None,
-) -> Generator[Tuple[AbsPath, HashResult], None, None]:
-    """Yield ``(abs_path, md5_or_None)`` as each worker finishes.
+) -> Generator[Tuple[FileMetadata, HashResult], None, None]:
+    """Yield ``(item, md5_or_None)`` as each worker finishes.
 
-    Results arrive in completion order, not submission order, so callers
-    can act on each hash immediately without waiting for the full batch.
+    *items* is any iterable of :class:`FileMetadata`; it is consumed
+    lazily, so callers may pass a generator (e.g. ``itertools.chain``)
+    without materializing the whole list. Results arrive in completion
+    order, not submission order, so callers can act on each hash
+    immediately without waiting for the full batch.
 
     Only a bounded window (``batch``) of files is submitted to the pool at
     a time; as one completes it is yielded and a replacement is submitted.
@@ -100,22 +105,25 @@ def stream_md5s(
     memory) proportional to ``batch`` rather than to the total file count,
     without changing the per-file commit cadence expected by callers.
     """
-    if not paths:
-        return
     if batch is None or batch <= 0:
         batch = ncores * 8  # default window: a small multiple of workers
     with ProcessPoolExecutor(max_workers=ncores) as executor:
-        it = iter(paths)
+        it = iter(items)
         # Submit an initial bounded window of work. Keep an explicit
-        # future->path map so we can look up the path for each result.
-        future_to_path = {executor.submit(compute_md5, p): p
-                          for p in islice(it, batch)}
-        pending = set(future_to_path)
+        # future->item map (bounded by ``batch``) to associate each result
+        # with its item; the full input list is never materialized here.
+        future_to_item = {
+            executor.submit(
+                compute_md5, os.path.join(item.top_folder, item.full_path)
+            ): item
+            for item in islice(it, batch)
+        }
+        pending = set(future_to_item)
         while pending:
             # Yield results in true completion order, refilling one-for-one.
             done, pending = wait(pending, return_when=FIRST_COMPLETED)
             for future in done:
-                path = future_to_path.pop(future)
+                item = future_to_item.pop(future)
                 try:
                     md5: HashResult = future.result()
                 except Exception:  # pylint: disable=broad-exception-caught
@@ -125,11 +133,14 @@ def stream_md5s(
                     # degrade to the "could not read" path so the caller
                     # marks it for retry on the next run.
                     md5 = None
-                yield path, md5
+                yield item, md5
                 # Refill the window with the next unreached file, if any.
                 if (nxt := next(it, None)) is not None:
-                    f = executor.submit(compute_md5, nxt)
-                    future_to_path[f] = nxt
+                    f = executor.submit(
+                        compute_md5,
+                        os.path.join(nxt.top_folder, nxt.full_path),
+                    )
+                    future_to_item[f] = nxt
                     pending.add(f)
 
 
@@ -171,8 +182,10 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
             ))
             count += 1
             if count % 1000 == 0:
-                print(f"\r[.] {to_printable(top_folder)}: {count} files...", end="", flush=True)
-    print(f"\r[.] {to_printable(top_folder)}: {count} files...", end="\n", flush=True)
+                print(f"\r[.] {to_printable(top_folder)}: {count} files...",
+                      end="", flush=True)
+    print(f"\r[.] {to_printable(top_folder)}: {count} files...",
+          end="\n", flush=True)
     return results
 
 
@@ -292,21 +305,21 @@ def to_printable(data: bytes) -> str:
 
 def sync_files_with_md5(
     db: FileDB,
-    files: List[FileMetadata],
+    files: Iterable[FileMetadata],
     ncores: int,
+    total: int,
 ) -> None:
-    """Compute MD5s for *files*, printing and committing as results arrive."""
-    if not files:
-        return
-    # Map absolute paths back to Metadata objects (get context after hashing)
-    path_to_item: Dict[AbsPath, FileMetadata] = {
-        os.path.join(item.top_folder, item.full_path): item for item in files
-    }
-    total = len(path_to_item)
+    """Compute MD5s for *files*, printing and committing as results arrive.
+
+    *files* may be any iterable (e.g. an ``itertools.chain`` or generator)
+    and is consumed lazily by the hashing pool, so callers do not need to
+    build a full list or a path-to-item reverse map. *total* is the number
+    of files to be hashed, used for the progress display.
+    """
     count = 0
-    for abs_bytes, md5 in stream_md5s(list(path_to_item), ncores):
+    for item, md5 in stream_md5s(files, ncores):
         count += 1
-        item = path_to_item[abs_bytes]
+        abs_bytes: AbsPath = os.path.join(item.top_folder, item.full_path)
         if md5 is None:
             print(f"[!] MD5 ERROR, could not read: {to_printable(abs_bytes)}")
         else:
@@ -359,7 +372,14 @@ def perform_sync(db: FileDB, top_folder: str, ncores: int) -> None:
         os.path.realpath(os.path.normpath(top_folder))
     )
     to_insert, to_update, to_delete = find_changes(db, top_bytes)
-    sync_files_with_md5(db, to_insert + to_update, ncores)
+    # Combine lazily (chain) instead of building a new list, and pass the
+    # known count separately for the progress display.
+    sync_files_with_md5(
+        db,
+        chain(to_insert, to_update),
+        ncores,
+        total=len(to_insert) + len(to_update),
+    )
     if to_delete:
         for _, full_path_bytes in to_delete:
             print(f"[-] Deleted (missing): {to_printable(full_path_bytes)}")
@@ -412,25 +432,25 @@ def compute_md5s_for_matches(
     """Compute MD5s by (top_folder, full_path) for FS items that exist in DB.
 
     Streams results as workers finish, printing each one immediately.
+    The matched items are passed to the hashing pool as a lazy generator.
     """
-    abs_to_key: Dict[AbsPath, TopFolderAndFullPath] = {}
-    for item in fs_data:
-        if (item.top_folder, item.full_path) not in db_data:
-            continue
-        abs_bytes: AbsPath = os.path.join(item.top_folder, item.full_path)
-        abs_to_key[abs_bytes] = (item.top_folder, item.full_path)
-    total = len(abs_to_key)
+    # One pass: collect the items we must hash (they exist in the DB).
+    matched = [
+        item for item in fs_data
+        if (item.top_folder, item.full_path) in db_data
+    ]
+    total = len(matched)
     count = 0
     result: Dict[TopFolderAndFullPath, HashResult] = {}
     last_percent = -1.0
-    for abs_bytes, md5 in stream_md5s(list(abs_to_key), ncores):
+    for item, md5 in stream_md5s(matched, ncores):
         count += 1
-        percent = (count / total) * 100
+        percent = (count / total) * 100 if total else 0
         if percent >= last_percent + 1 or count == total:
             print(f"\r[-] Validation: {percent:.2f}% ({count}/{total})",
                   end="", flush=True)
             last_percent = percent
-        result[abs_to_key[abs_bytes]] = md5
+        result[(item.top_folder, item.full_path)] = md5
     print()
     return result
 
