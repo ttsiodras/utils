@@ -139,7 +139,7 @@ ffmpeg \
     -i "$1" \
     -c:v hevc_vaapi \
     -qp 31 \
-    -c:a copy \
+    -c:a libopus \
     -noautoscale \
     "$TARGET"
 

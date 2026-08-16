@@ -6,8 +6,10 @@ and supports duplicate-copy limits (-l) and integrity validation (-v).
     https://github.com/ttsiodras/FileIndexer
 
 See the repository README for usage, and the AI.prompts/ folder for the
-prompts used for development. This is an evolving experiment in using
-local AI - gotta say, quite pleased with the result.
+prompts used during development. This codebase was built with the help of
+local AI models, as a hands-on use case for applying AI the way I want it
+(local, private). But don't hold this against it; I did review the result
+and honestly believe this to be a good Python codebase.
 
 Models used so far in building/debugging/improving this code:
 
@@ -98,14 +100,19 @@ def stream_md5s(
     items: Iterable[FileMetadata],
     ncores: int,
     batch: Optional[int] = None,
-) -> Generator[Tuple[FileMetadata, HashResult], None, None]:
-    """Yield ``(item, md5_or_None)`` as each worker finishes.
+) -> Generator[Tuple[FileMetadata, HashResult, bool], None, None]:
+    """Yield ``(item, md5_or_None, degraded)`` as each worker finishes.
 
     *items* is any iterable of :class:`FileMetadata`; it is consumed
     lazily, so callers may pass a generator (e.g. ``itertools.chain``)
     without materializing the whole list. Results arrive in completion
     order, not submission order, so callers can act on each hash
     immediately without waiting for the full batch.
+
+    ``degraded`` is True only when ``md5`` is ``None`` *because the hashing
+    pool broke* (a worker was killed / OOM'd), as opposed to a normal
+    per-file I/O error. Callers can use it to avoid treating a mass pool
+    failure as a per-file read error.
 
     Only a bounded window (``batch``) of files is submitted to the pool at
     a time; as one completes it is yielded and a replacement is submitted.
@@ -127,6 +134,7 @@ def stream_md5s(
             for item in islice(it, batch)
         }
         pending = set(future_to_item)
+        pool_dead = False
         while pending:
             # Yield results in true completion order, refilling one-for-one.
             done, pending = wait(pending, return_when=FIRST_COMPLETED)
@@ -136,29 +144,80 @@ def stream_md5s(
                     md5: HashResult = future.result()
                 except Exception:  # pylint: disable=broad-exception-caught
                     # A worker died for whatever reason (for example OSError,
-                    # MemoryError on a huge file, or a BrokenProcessPool from
-                    # a killed process). Rather than abort the whole sync,
-                    # degrade to the "could not read" path so the caller
-                    # marks it for retry on the next run.
+                    # MemoryError on a huge file, or the pool being broken by a
+                    # killed worker). Rather than abort the whole sync, degrade
+                    # to the "could not read" path: store md5=None (a NULL row)
+                    # so find_changes re-hashes it on the next run.
                     md5 = None
-                yield item, md5
+                yield item, md5, pool_dead
+                if pool_dead:
+                    # The pool broke during a refill below; already-submitted
+                    # futures are handled above (result() raises BrokenProcessPool
+                    # md5 -> None), for both the rest of this `done` batch, and
+                    # any still sitting in `pending` (they error out in later
+                    # while iterations). Just stop refilling it.
+                    continue
                 # Refill the window with the next unreached file, if any.
                 nxt = next(it, None)
-                if nxt is not None:
+                if nxt is None:
+                    continue
+                try:
                     f = executor.submit(
                         compute_md5,
                         os.path.join(nxt.top_folder, nxt.full_path),
                     )
-                    future_to_item[f] = nxt
-                    pending.add(f)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    # The pool is broken (e.g. a worker was killed or OOM'd), so
+                    # submitting any further work raises immediately. Stop
+                    # submitting to the dead pool; degrade this file and every
+                    # remaining one to md5=None (a NULL row) so find_changes
+                    # re-hashes them all on the next run, instead of aborting
+                    # the sync with an unhandled traceback. Note the split of
+                    # labour: `it` (the never-submitted remainder of the input)
+                    # is drained inline right here, while `done`/`pending` (the
+                    # already-submitted but now-broken futures) are drained by
+                    # the future.result() -> None path above -- so no item is
+                    # dropped and none is drained twice.
+                    pool_dead = True
+                    yield nxt, None, True
+                    for remaining in it:
+                        yield remaining, None, True
+                    continue
+                future_to_item[f] = nxt
+                pending.add(f)
 
 
-def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
+# User customization: directories we never want indexed. Any directory whose
+# path contains one of these tokens as a substring is skipped (both its files
+# and its subtree). Kept as bytes to match the byte paths used in the scan.
+#
+# Add a distinctive path fragment for anything you'd rather not index (e.g.
+# large files you can cheaply re-download, such as model weights or offline
+# wikipedia mirrors). An empty list disables the filter.
+#
+_DROP_DIR_TOKENS: List[bytes] = [
+    # b'Deepseek', b'aard',
+]
+
+
+def scan_folder(  # pylint: disable=too-many-branches
+    top_folder: SafeTopFolder,
+) -> Tuple[List[FileMetadata], List[SafeRelPath]]:
     """Recursively scan a folder and return file metadata.
 
-    *top_folder* must be an absolute path as bytes. Returns a list of
-    ``FileMetadata`` with filename, full_path (relative to top_folder),
-    top_folder, mtime, and filesize.
+    *top_folder* must be an absolute path as bytes. Returns a tuple of
+    ``(results, failed_dirs)`` where ``results`` is a list of ``FileMetadata``
+    (filename, full_path relative to top_folder, top_folder, mtime, filesize)
+    and ``failed_dirs`` is a list of relative paths to directories that could
+    not be entered (permission denied, transient I/O error, ...) and were
+    therefore skipped. Rows under such directories must NOT be treated as
+    'deleted' by callers. An external USB drive can have a transient cable
+    related fault; we dont want to lose 1000s of MD5 checksums because of
+    such an issue!
+
+    Uses ``os.scandir`` directly (rather than ``os.walk``) so each entry
+    already carries its symlink/stat info, avoiding an extra ``islink`` +\
+    ``stat`` syscall per file -- significant when scanning millions of files.
 
     Raises FileNotFoundError if the folder does not exist.
     """
@@ -166,28 +225,59 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
         raise FileNotFoundError(
             f"Folder does not exist: {to_printable(top_folder)}")
     results: List[FileMetadata] = []
+    failed_dirs: List[SafeRelPath] = []
     count = 0
-    for dirpath, _, filenames in os.walk(top_folder, followlinks=False):
-        for filename in filenames:
-            full_path_abs = os.path.join(dirpath, filename)
-            # Skip symbolic links to prevent infinite loops
-            # or scanning outside top_folder.
-            if os.path.islink(full_path_abs):
-                continue
-            rel_path = os.path.relpath(full_path_abs, top_folder)
+
+    # Explicit stack (iterative, to avoid hitting the recursion limit on very
+    # deep trees) for a depth-first, followlinks=False traversal.
+    stack = [top_folder]
+    while stack:
+        dirpath = stack.pop()
+        # User customization: skip any directory whose path contains a token
+        # we do not want indexed (also applies to the top folder itself).
+        if any(token in dirpath for token in _DROP_DIR_TOKENS):
+            continue
+        try:
+            entries = list(os.scandir(dirpath))
+        except OSError as error:
+            # Could not enter this directory (EACCES, transient EIO, ...).
+            # Record it so its rows are not treated as deleted, and warn.
             try:
-                stat = os.stat(full_path_abs)
-                mtime = stat.st_mtime
-                filesize = stat.st_size
+                rel = os.path.relpath(dirpath, top_folder)
+            except (ValueError, OSError):
+                rel = None
+            if rel is not None:
+                if isinstance(rel, str):
+                    rel = os.fsencode(rel)
+                failed_dirs.append(rel)
+            location = getattr(error, 'filename', None) or dirpath
+            print(f"[!] Unreadable directory, skipping: "
+                  f"{to_printable(location)}")
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    # Skip symbolic links (to files or dirs): prevents infinite
+                    # loops and scanning outside top_folder (followlinks=False).
+                    continue
+                if entry.is_dir():
+                    # Descend into real subdirectories only.
+                    stack.append(entry.path)
+                    continue
             except OSError:
-                # Skip files that cannot be accessed (e.g. permission denied).
+                # Could not stat this entry; skip it rather than aborting.
+                continue
+            # A regular file: use the entry's cached stat (no extra syscall).
+            try:
+                st = entry.stat()
+            except OSError:
                 continue
             results.append(FileMetadata(
-                filename=filename,
-                full_path=rel_path,
+                filename=entry.name,
+                full_path=os.path.relpath(entry.path, top_folder),
                 top_folder=top_folder,
-                mtime=mtime,
-                filesize=filesize,
+                mtime=st.st_mtime,
+                filesize=st.st_size,
             ))
             count += 1
             if count % 1000 == 0:
@@ -195,7 +285,30 @@ def scan_folder(top_folder: SafeTopFolder) -> List[FileMetadata]:
                       end="", flush=True)
     print(f"\r[.] {to_printable(top_folder)}: {count} files...",
           end="\n", flush=True)
-    return results
+    return results, failed_dirs
+
+
+_IFS_SEP: bytes = os.fsencode(os.sep)  # bytes form of the path separator
+
+
+def is_under_failed_dir(
+    full_path: SafeRelPath, failed_dirs: List[SafeRelPath]
+) -> bool:
+    """True if *full_path* is inside a directory on *failed_dirs*.
+
+    A directory fails *as a whole* (its subtree was not scanned), so a
+    relative path is protected when it equals a failed dir or lies below it.
+    """
+    for fd in failed_dirs:
+        if fd in (b'', b'.'):
+            # The top folder itself could not be scanned (transient I/O error
+            # on the root; relpath of the root against itself is "."), so its
+            # whole subtree is unknown. Protect every row: an unscanned area
+            # must never be treated as "deleted".
+            return True
+        if full_path == fd or full_path.startswith(fd + _IFS_SEP):
+            return True
+    return False
 
 
 class FileDB:
@@ -204,7 +317,13 @@ class FileDB:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        mode = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        if mode and mode[0] != 'wal':
+            # On filesystems without WAL support (FAT/exFAT, some network
+            # shares) the PRAGMA silently keeps another journal mode; warn so
+            # the user knows the DB isn't behaving as configured.
+            print(f"[!] Journal mode is {mode[0]}, not WAL, on {db_path}"
+                  f" (WAL unsupported on this filesystem).")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self._ensure_table()
 
@@ -248,12 +367,13 @@ class FileDB:
 
     def upsert_with_md5(self, item: FileMetadata, md5: HashResult) -> None:
         """Insert or update a file row including its MD5."""
+        # filename/top_folder are deliberately not updated: they are the
+        # conflict key (top_folder, full_path) or its basename, so they can
+        # never differ on conflict.
         self.conn.execute(
             '''INSERT INTO files (filename, full_path, top_folder,
                mtime, md5, filesize) VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(top_folder, full_path) DO UPDATE SET
-                   filename=excluded.filename,
-                   top_folder=excluded.top_folder,
                    mtime=excluded.mtime,
                    md5=excluded.md5,
                    filesize=excluded.filesize''',
@@ -272,16 +392,33 @@ class FileDB:
             paths,
         )
 
-    def query_limit(self, limit: int) -> List[LimitCheckResult]:
+    def query_limit(
+        self, limit: int,
+        top_folders: Optional[Iterable[SafeTopFolder]] = None,
+    ) -> List[LimitCheckResult]:
         """Find (full_path, md5) pairs that appear in fewer than ``limit``
         distinct top_folders.
+
+        If *top_folders* is given, only copies within those folders count
+        (the check is scoped to exactly the folders the user asked about);
+        otherwise every top_folder in the database is considered.
         """
-        cursor = self.conn.execute('''
-            SELECT full_path, md5, COUNT(DISTINCT top_folder) AS copies
-            FROM files
-            WHERE md5 IS NOT NULL
-            GROUP BY full_path, md5
-            HAVING copies < ?''', (limit,))
+        if top_folders:
+            scope = list(top_folders)
+            placeholders = ','.join('?' * len(scope))
+            cursor = self.conn.execute(f'''
+                SELECT full_path, md5, COUNT(DISTINCT top_folder) AS copies
+                FROM files
+                WHERE md5 IS NOT NULL AND top_folder IN ({placeholders})
+                GROUP BY full_path, md5
+                HAVING copies < ?''', (*scope, limit))
+        else:
+            cursor = self.conn.execute('''
+                SELECT full_path, md5, COUNT(DISTINCT top_folder) AS copies
+                FROM files
+                WHERE md5 IS NOT NULL
+                GROUP BY full_path, md5
+                HAVING copies < ?''', (limit,))
         return [LimitCheckResult(*row) for row in cursor]
 
     def get_rows_for_validation(
@@ -326,25 +463,34 @@ def sync_files_with_md5(
     of files to be hashed, used for the progress display.
     """
     count = 0
-    for item, md5 in stream_md5s(files, ncores):
+    degraded = 0
+    for item, md5, died in stream_md5s(files, ncores):
         count += 1
         abs_bytes: AbsPath = os.path.join(item.top_folder, item.full_path)
-        if md5 is None:
+        if md5 is None and not died:
             print(f"[!] MD5 ERROR, could not read: {to_printable(abs_bytes)}")
-        else:
+        elif md5 is not None:
             print(f"[-] MD5: {count}/{total} files, "
                   f"computed MD5 for {to_printable(abs_bytes)}")
+        else:
+            # md5 is None because the hashing pool broke (a worker died);
+            # avoid flooding the log with a per-file error for every file that
+            # was in flight. They are stored as NULL and retried next run.
+            degraded += 1
         # Update the database immediately for this file.
         # Frequent commits ensure data is saved on crash.
         db.upsert_with_md5(item, md5)
         db.commit()
+    if degraded:
+        print(f"[!] A hashing worker died; {degraded} file(s) left unhashed "
+              f"(md5=NULL) and will be retried on the next run.")
 
 
 def find_changes(
     db: FileDB, top_folder_bytes: SafeTopFolder
 ) -> Tuple[Insertions, Updates, Deletions]:
     """Compare filesystem state with database, return categorised changes."""
-    fs_data = scan_folder(top_folder_bytes)
+    fs_data, failed_dirs = scan_folder(top_folder_bytes)
     db_data = db.load_folder(top_folder_bytes)
     fs_paths = {item.full_path for item in fs_data}
 
@@ -363,24 +509,37 @@ def find_changes(
             # computation failed (md5 is None); requires re-hashing.
             to_update.append(item)
 
-    # Identify files in DB that are no longer present on the filesystem.
+    # Identify files in DB that are no longer present on the filesystem -- but
+    # NOT files under a directory that could not be scanned (they are not really
+    # missing; deleting them on a transient EIO/permission error would silently
+    # discard live index rows). The worst case becomes "rows survive, re-check
+    # on the next run" instead of "rows vanish".
     to_delete: Deletions = [
-        (tf, fp) for (tf, fp) in db_data if fp not in fs_paths
+        (tf, fp) for (tf, fp) in db_data
+        if fp not in fs_paths and not is_under_failed_dir(fp, failed_dirs)
     ]
     return to_insert, to_update, to_delete
 
 
-def perform_sync(db: FileDB, top_folder: str, ncores: int) -> None:
+def perform_sync(db: FileDB, top_folder: str, ncores: int) -> bool:
     """Synchronise a folder against the database.
 
     Inserts new files, updates rows whose mtime or filesize changed,
     and removes rows for files that no longer exist on disk.
+
+    Returns True on success, or False if *top_folder* no longer exists (in
+    which case a warning is printed and the folder is skipped) so callers can
+    keep going with the remaining folders but still exit non-zero.
     """
     # Resolve symlinks and use os.fsencode() for correct POSIX byte encoding.
     top_bytes: SafeTopFolder = os.fsencode(
-        os.path.realpath(os.path.normpath(top_folder))
+        os.path.realpath(top_folder)
     )
-    to_insert, to_update, to_delete = find_changes(db, top_bytes)
+    try:
+        to_insert, to_update, to_delete = find_changes(db, top_bytes)
+    except FileNotFoundError:
+        print(f"[!] Skipping missing (or non-folder): {top_folder}")
+        return False
     # Combine lazily (chain) instead of building a new list, and pass the
     # known count separately for the progress display.
     sync_files_with_md5(
@@ -398,14 +557,20 @@ def perform_sync(db: FileDB, top_folder: str, ncores: int) -> None:
         f"[-] Sync complete: {len(to_insert)} inserted, "
         f"{len(to_update)} updated, {len(to_delete)} deleted"
     )
+    return True
 
 
-def run_limit_check(db: FileDB, limit: int, report_path: str) -> None:
+def run_limit_check(
+    db: FileDB, limit: int, report_path: str,
+    top_folders: Optional[Iterable[SafeTopFolder]] = None,
+) -> None:
     """Run the limit check and write results to *report_path*.
 
-    Each line has the form: ``<full_path>#@#<existing_copy_count> <md5>``
+    Each line has the form: ``<full_path>#@#<existing_copy_count> <md5>``.
+    *top_folders* scopes the check to those folders (when given); otherwise
+    every folder in the database is considered.
     """
-    results = db.query_limit(limit)
+    results = db.query_limit(limit, top_folders)
     with open(report_path, 'w', encoding='utf-8', errors='replace') as f:
         for full_path, md5, copies in results:
             path_str = to_printable(full_path)
@@ -414,23 +579,27 @@ def run_limit_check(db: FileDB, limit: int, report_path: str) -> None:
 
 def scan_target(
     top_folder: Optional[SafeTopFolder], rows: List[FileRecord]
-) -> List[FileMetadata]:
+) -> Tuple[List[FileMetadata], List[SafeRelPath]]:
     """Scan filesystem for *top_folder* or all top_folders found in *rows*.
 
     If a top_folder from the DB no longer exists on disk, a warning is
     printed and that folder is skipped instead of crashing the whole run.
+    Returns ``(results, failed_dirs)``; see :func:`scan_folder`.
     """
     if top_folder is not None:
         return scan_folder(top_folder)
 
     top_folders: Set[SafeTopFolder] = {row.top_folder for row in rows}
     results: List[FileMetadata] = []
+    failed_dirs: List[SafeRelPath] = []
     for tf in top_folders:
         try:
-            results.extend(scan_folder(tf))
+            res, fds = scan_folder(tf)
+            results.extend(res)
+            failed_dirs.extend(fds)
         except FileNotFoundError:
             print(f"[!] Top folder missing, skipping: {to_printable(tf)}")
-    return results
+    return results, failed_dirs
 
 
 def compute_md5s_for_matches(
@@ -452,7 +621,7 @@ def compute_md5s_for_matches(
     count = 0
     result: Dict[TopFolderAndFullPath, HashResult] = {}
     last_percent = -1.0
-    for item, md5 in stream_md5s(matched, ncores):
+    for item, md5, _died in stream_md5s(matched, ncores):
         count += 1
         percent = (count / total) * 100 if total else 0
         if percent >= last_percent + 1 or count == total:
@@ -534,24 +703,50 @@ def write_report(
 
 def run_validation(
     db: FileDB, target: str, report_path: str, ncores: int
-) -> None:
+) -> bool:
     """Validate DB rows against the filesystem.
 
     Generates a report with MATCH, MISMATCH, MISSING, and NEW sections.
+    Returns True on success, or False if *target* (a specific folder) no
+    longer exists -- in which case a warning is printed and nothing is
+    written. ``target == 'all'`` already skips any missing DB top_folder with
+    a warning inside :func:`scan_target`.
     """
     top_bytes: Optional[SafeTopFolder] = (
         None if target == 'all'
-        else os.fsencode(os.path.realpath(os.path.normpath(target))))
+        else os.fsencode(os.path.realpath(target)))
     rows = db.get_rows_for_validation(top_bytes)
     db_data: Dict[TopFolderAndFullPath, HashResult] = {
         (row.top_folder, row.full_path): row.md5 for row in rows
     }
-    fs_data = scan_target(top_bytes, rows)
+    try:
+        fs_data, _failed_dirs = scan_target(top_bytes, rows)
+    except FileNotFoundError:
+        print(f"[!] Skipping missing (or non-folder): {target}")
+        return False
     fs_lookup = {(item.top_folder, item.full_path): item for item in fs_data}
     computed_md5s = compute_md5s_for_matches(fs_data, db_data, ncores)
     match, mismatch, missing, new_files = classify_entries(
         db_data, fs_lookup, computed_md5s)
     write_report(report_path, match, mismatch, missing, new_files)
+    return True
+
+
+def _db_inside_top_folder(folder: str, db_path: str) -> bool:
+    """True if *db_path* is inside (or equal to) *folder*, both resolved.
+
+    Used to reject storing the database inside a folder that is about to be
+    scanned: the tool would otherwise index its own DB file (and live
+    -wal/-shm sidecars).
+    """
+    folder_canon = os.path.realpath(folder)
+    db_canon = os.path.realpath(db_path)
+    try:
+        return (os.path.commonpath([db_canon, folder_canon])
+                == folder_canon)
+    except ValueError:
+        # e.g. paths on different drives share no common prefix -> not inside.
+        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -597,6 +792,16 @@ def main() -> None:
     """Entry point: parse arguments and dispatch to the appropriate mode."""
     args = parse_args()
 
+    # Fail fast if the database is stored inside a folder we are about to scan.
+    # Doing so would make the tool index its own DB file (and live -wal/-shm
+    # sidecars), which churns every run and reads a transiently inconsistent
+    # file. That is an anti-pattern, so abort before any walk or write happens.
+    for folder in args.top_folder:
+        if _db_inside_top_folder(folder, args.db):
+            print(f"Error: database {args.db} is inside folder being scanned: "
+                  f"{folder}. Store it outside the scanned tree.")
+            sys.exit(1)
+
     # Determine number of worker processes.
     ncores: int = (
         args.ncores if (args.ncores is not None and args.ncores > 0)
@@ -606,22 +811,47 @@ def main() -> None:
     with FileDB(args.db) as db:
         if args.validate is not None:
             # Mode 1: Validate existing DB against current filesystem state.
-            run_validation(db, args.validate, args.report, ncores)
+            if not run_validation(db, args.validate, args.report, ncores):
+                sys.exit(1)
             print(f"[-] Validation complete. Report written to {args.report}")
         elif args.limit is not None:
-            # Mode 2: Sync all provided folders, and find low redundancy files.
+            # Mode 2: Sync the provided folders (if any), then run the
+            # redundancy check. With no folders the check covers every indexed
+            # folder; with folders it is scoped to exactly those.
+            all_present = True
             for folder in args.top_folder:
-                perform_sync(db, folder, ncores)
-            run_limit_check(db, args.limit, args.report)
+                if not perform_sync(db, folder, ncores):
+                    all_present = False
+            if not all_present:
+                # A folder we were asked to scope to is missing, so -l would
+                # count its stale rows as present copies (false redundancy
+                # pass). Refuse and exit non-zero instead.
+                print("Error: one or more top folders are missing; skipping the"
+                      " limit check (stale rows would give a false redundancy "
+                      "pass).")
+                sys.exit(1)
+            # top_folders for the query must be in the same bytes form as the
+            # rows' top_folder column (matching perform_sync's top_bytes).
+            scope = (
+                [os.fsencode(os.path.realpath(f)) for f in args.top_folder]
+                if args.top_folder else None
+            )
+            run_limit_check(db, args.limit, args.report, scope)
             print(f"[-] Limit check complete. Report written to {args.report}")
         else:
             # Mode 3: Standard synchronization - all provided folders.
-            if not args.top_folder:
-                print("Error: No top folder provided for sync.")
-                sys.exit(1)
+            all_present = True
             for folder in args.top_folder:
-                perform_sync(db, folder, ncores)
+                if not perform_sync(db, folder, ncores):
+                    all_present = False
+                    continue
                 print(f"[-] DB sync complete for {folder}")
+            # If a top folder was missing (warned + skipped above), signal the
+            # partial failure with a non-zero exit code so scripts/automation
+            # can tell the run didn't fully succeed -- even though the present
+            # folders were still synced.
+            if not all_present:
+                sys.exit(1)
 
 
 if __name__ == '__main__':
