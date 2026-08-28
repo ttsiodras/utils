@@ -21,17 +21,7 @@ USER ${USERNAME}
 
 ENV HOME=/home/${USERNAME}
 
-# Install Pi SubAgents if you need them
-#
-# ENV NPM_PREFIX=/home/${USERNAME}/.npm-global
-# ENV PATH="/home/${USERNAME}/.npm-global/bin:/home/${USERNAME}/.venv/bin:$PATH"
-# RUN mkdir -p ${HOME}/.npm-global && \
-#     npm config set prefix "${HOME}/.npm-global" && \
-#     npm install -g @mariozechner/pi-coding-agent
-# RUN pi install npm:@tintinweb/pi-subagents
-
 # General config
-
 ENV COLORTERM=truecolor
 ENV TERM=xterm-256color
 ENV NO_TELEMETRY=1
@@ -39,15 +29,17 @@ ENV DO_NOT_TRACK=1
 
 WORKDIR /home/${USERNAME}
 
-# RUN python3 -m venv ${HOME}/.venv && \
-#     ${HOME}/.venv/bin/pip install --upgrade pip && \
-#     ${HOME}/.venv/bin/pip install pylint flake8 mypy
-# RUN echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.bashrc && \
-#     echo 'source ${HOME}/.venv/bin/activate' >> ${HOME}/.profile
-# ENV PATH="/home/${USERNAME}/.venv/bin:$PATH"
-
 COPY .tmux.conf /home/${USERNAME}/
-# COPY pi.extensions /home/${USERNAME}/.pi/agent/extensions
 
 RUN mkdir -p ${HOME}/.pi/agent/sessions
+
+# --- Trim (build-time-only cruft not needed at runtime) ---
+USER root
+RUN rm -rf /usr/include/node \
+       /root/.npm \
+    && apt-get -y autoremove --purge \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && chown -R ${UID}:${GID} /home/${USERNAME}
+USER ${USERNAME}
+
 CMD ["bash"]
