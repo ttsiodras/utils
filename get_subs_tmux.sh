@@ -36,7 +36,7 @@ tmux new-session -d -s "$SESSION" -c "$SCRIPT_DIR"
 # We mirror the docker configuration from pi.google_run.sh but remove --mode json and -p
 # to enter the interactive TUI mode.
 PI_CMD="source ai.google.key && \
-    docker run -w \$PWD --rm -v \$PWD:\$PWD \
+    podman run -w \$PWD --rm -v \$PWD:\$PWD \
     -e NODE_NO_READLINE=1 -e FORCE_COLOR=1 \
     -e GOOGLE_AI_STUDIO_API_KEY=\$KEY -e GEMINI_API_KEY=\$KEY \
     -it pi pi --model gemma-4-31b-it"
