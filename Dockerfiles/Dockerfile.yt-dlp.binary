@@ -1,11 +1,45 @@
-# From https://news.ycombinator.com/item?id=45898407
-FROM python:3-slim
+# yt-dlp_image
+#
+# yt-dlp only uses ffmpeg to REMUX / MERGE downloaded streams (not to encode),
+# so it doesn't need a runtime codec library tree. We pull a single self-contained
+# STATIC ffmpeg binary instead of Debian's apt ffmpeg, which drags in ~450 MB of
+# codec/GPU/LLVM shared libraries (libLLVM 124M, mesa 41M, libz3, libav*, etc.)
+#
+# ALL downloads happen in a throwaway fetch stage (which has curl), so the final
+# runtime image needs no apt, no curl (beyond what python:3-slim bakes in),
+# and carries only the three binaries as fresh files.
+
+FROM debian:bookworm AS fetch
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -q -y ffmpeg curl unzip \
- && curl -fsSL https://deno.land/install.sh -o /tmp/deno.sh \
- && sh /tmp/deno.sh -y \
- && mv /root/.deno/bin/deno /usr/local/bin/ \
- && rm --force --recursive /var/lib/apt/lists/* /tmp/* /var/tmp/*
-RUN curl -L -o /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
-RUN chmod +x /usr/local/bin/yt-dlp 
+ && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -q -y curl unzip xz-utils ca-certificates \
+ \
+ && curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+        -o /tmp/ffmpeg.tar.xz \
+ && mkdir -p /tmp/ff \
+ && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 \
+ && install -m755 /tmp/ff/ffmpeg  /usr/local/bin/ffmpeg-static \
+ && install -m755 /tmp/ff/ffprobe /usr/local/bin/ffprobe-static \
+ \
+ && curl -fsSL -o /usr/local/bin/yt-dlp \
+        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+ && chmod +x /usr/local/bin/yt-dlp \
+ \
+ && curl -fsSL -o /tmp/deno.zip \
+        https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+ && unzip -qo /tmp/deno.zip -d /usr/local/bin/ \
+ && chmod +x /usr/local/bin/deno \
+ \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Final runtime image
+FROM python:3-slim
+
+# Self-contained binaries only (no apt installs in the runtime stage)
+COPY --from=fetch /usr/local/bin/ffmpeg-static  /usr/local/bin/
+COPY --from=fetch /usr/local/bin/ffprobe-static /usr/local/bin/
+COPY --from=fetch /usr/local/bin/yt-dlp        /usr/local/bin/
+COPY --from=fetch /usr/local/bin/deno          /usr/local/bin/
+RUN ln -sf /usr/local/bin/ffmpeg-static  /usr/local/bin/ffmpeg \
+ && ln -sf /usr/local/bin/ffprobe-static /usr/local/bin/ffprobe
+
 ENTRYPOINT ["yt-dlp"]
