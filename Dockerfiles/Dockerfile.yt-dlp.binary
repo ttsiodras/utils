@@ -29,6 +29,15 @@ RUN apt-get update \
  && unzip -qo /tmp/deno.zip -d /usr/local/bin/ \
  && chmod +x /usr/local/bin/deno \
  \
+ && curl -fsSL -o /tmp/upx.tar.xz \
+        https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-amd64_linux.tar.xz \
+ && tar -xJf /tmp/upx.tar.xz -C /tmp \
+ && install -m755 /tmp/upx-5.2.0-amd64_linux/upx /usr/local/bin/upx \
+ \
+ && upx /usr/local/bin/ffmpeg-static \
+ && upx /usr/local/bin/ffprobe-static \
+ && (upx /usr/local/bin/deno || echo 'upx: deno skipped (incompatible, keeping original)') \
+ \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Final runtime image
