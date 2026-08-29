@@ -12,10 +12,10 @@ RUN apt update && \
     useradd --uid ${UID} --gid ${GID} --create-home --shell /bin/bash ${USERNAME} && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /usr/include/node /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* /var/tmp/*
 
 # Install Pi Agent
-RUN npm install -g @mariozechner/pi-coding-agent
+RUN npm install -g @mariozechner/pi-coding-agent --no-cache
 
 USER ${USERNAME}
 
@@ -33,13 +33,9 @@ COPY .tmux.conf /home/${USERNAME}/
 
 RUN mkdir -p ${HOME}/.pi/agent/sessions
 
-# --- Trim (build-time-only cruft not needed at runtime) ---
+# --- Own the home dir (byte-cleanups are folded into the install layers above) ---
 USER root
-RUN rm -rf /usr/include/node \
-       /root/.npm \
-    && apt-get -y autoremove --purge \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && chown -R ${UID}:${GID} /home/${USERNAME}
+RUN chown -R ${UID}:${GID} /home/${USERNAME}
 USER ${USERNAME}
 
 CMD ["bash"]
