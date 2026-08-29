@@ -12,7 +12,7 @@ def computeRate(input_video):
         'ID_VIDEO_FPS']
     values = {}
     cmd = "mplayer -identify -frames 0 -vo null {} 2>/dev/null"
-    cmd += cmd.format(shlex.quote(input_video))
+    cmd = cmd.format(shlex.quote(input_video))
     for line in os.popen(cmd).readlines():
         for key in keys:
             if line.startswith(key):
