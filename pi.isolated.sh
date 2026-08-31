@@ -57,8 +57,7 @@ URL=http://127.0.0.1:$PORT
 
 # (a) Check/Launch host relay
 if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:$PORT" >/dev/null; then
-    echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
-  echo "[+] Launching host socat relay..."
+  echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
   rm -f "$SOCK"
   socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT 2>/dev/null &
   SOCAT_PID=$!
@@ -125,9 +124,9 @@ sleep 1
 
 mkdir -p ~/.pi/agent/
 
-if [[ "$MODEL_ID" == *"deepseek-v4-flash"* ]]; then
-  echo "[+] Detected deepseek-v4-flash: using embedded ds4 config"
-  cat > ~/.pi/agent/models.json << 'EMBEDDED_DS4'
+if [[ "$MODEL_ID" == *"deepseek"* ]]; then
+  echo "[+] Detected deepseek reasoning model: using deepseek compat (sizes from vLLM)"
+  cat > ~/.pi/agent/models.json << EOF
 {
   "providers": {
     "local-vllm": {
@@ -146,8 +145,8 @@ if [[ "$MODEL_ID" == *"deepseek-v4-flash"* ]]; then
       },
       "models": [
         {
-          "id": "deepseek-v4-flash",
-          "name": "deepseek-v4-flash (local vllm)",
+          "id": "$MODEL_ID",
+          "name": "$MODEL_ID (local vllm)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -160,8 +159,8 @@ if [[ "$MODEL_ID" == *"deepseek-v4-flash"* ]]; then
           "input": [
             "text"
           ],
-          "contextWindow": 326144,
-          "maxTokens": 326144,
+          "contextWindow": $CTX_SIZE,
+          "maxTokens": $MAX_TOKENS,
           "cost": {
             "input": 0,
             "output": 0,
@@ -173,7 +172,7 @@ if [[ "$MODEL_ID" == *"deepseek-v4-flash"* ]]; then
     }
   }
 }
-EMBEDDED_DS4
+EOF
 else
   cat > ~/.pi/agent/models.json << EOF
 {
