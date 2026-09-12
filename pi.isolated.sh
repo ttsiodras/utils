@@ -1,4 +1,10 @@
 #!/bin/bash
+# pi.isolated2.sh — like pi.isolated.sh, but model capabilities (in particular
+# the *thinking levels*, which differ per model family: gpt-oss, deepseek-r1,
+# qwen3, GLM, gemini, ...) are auto-detected by the embedded Python detector
+# (fully standalone - no external files) instead
+# of being hardcoded.  Use --probe for a live probe of which reasoning wire
+# format the server actually honours.
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 if [ "$PWD" == "$HOME" ] ; then
@@ -9,16 +15,10 @@ if [ "$PWD" == "$HOME" ] ; then
     read ANS
 fi
 
-# Nastiness.
-#
-# When I use isolate.sh (see last line in this script) - which I HAVE to do,
-# since we live in days of daily kernel exploits and supply chain attacks!
-# ...well, I suffer from this:
-# My locally running model listens at localhost:PORT.  firejail (which is what
-# my isolate.sh uses) creates a new network namespace; so my machine's
-# localhost becomes invisible (the new network namespace has its own lo!)
-#
-# So... we tunnel via a pair of socats; over a UNIX domain socket.
+# Nastiness (same as pi.isolated.sh):
+# locally running model listens at localhost:PORT; firejail/isolate.sh makes
+# the host's localhost invisible, so we tunnel via a pair of socats over a
+# UNIX domain socket.
 
 OUR_RANDOM_PID=$$
 SOCK="$HOME/llama.sock.$OUR_RANDOM_PID"
@@ -27,190 +27,554 @@ SOCK="$HOME/llama.sock.$OUR_RANDOM_PID"
 die()      { echo "error: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-Usage: pi.isolated.sh [--port PORT] [isolate.sh OPTIONS] [-- pi OPTIONS]
-See isolate.sh --help for full isolate.sh option documentation.
-PORT defaults to 8081.
+Usage: pi.isolated2.sh [OPTIONS] [-- pi OPTIONS]
+
+Model detection options:
+  --port PORT              Local model port (default 8081)
+  --url URL                Full base URL of an OpenAI-compatible server
+                           (e.g. https://generativelanguage.googleapis.com/v1beta/openai/v1)
+                           Skips the local socat tunnel.
+  --api-key KEY            API key for --url (default: $GEMINI_API_KEY if set)
+  --thinking auto|on|off   Force reasoning on/off (default: auto-detect)
+  --thinking-format FMT    Force thinking wire format:
+                           auto|openai|openrouter|deepseek|together|zai|qwen|qwen-chat-template
+  --image / --no-image     Force vision on/off (default: auto-detect)
+  --probe                  Live-probe the server (a few extra requests) to see
+                           which reasoning style actually produces thinking, and
+                           whether thinking can be switched off at all.
+  --detect-only            Only detect + write models.json; do not launch pi.
+
+Any other options are passed to isolate.sh (see isolate.sh --help),
+arguments after -- are passed to pi.
 EOF
   exit 2
 }
 
-# Wrapper-specific: --port for the host-side model endpoint.
-# The inner sandbox socat always listens on 8081; this only changes
-# what the host-side relay (and curl) talk to.
-# --port can appear anywhere in the argument list.
 PORT=8081
+URL_FULL=""
+API_KEY="${GEMINI_API_KEY:-}"
+THINKING=auto
+THINK_FORMAT=auto
+IMAGE_MODE=auto
+PROBE=0
+DETECT_ONLY=0
+
 _rest=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --port=*) PORT="${1#*=}"; shift ;;
-        --port)  [[ $# -ge 2 ]] || usage; PORT="$2"; shift 2 ;;
-        *)       _rest+=("$1"); shift ;;
+        --port=*)            PORT="${1#*=}"; shift ;;
+        --port)              [[ $# -ge 2 ]] || usage; PORT="$2"; shift 2 ;;
+        --url=*)             URL_FULL="${1#*=}"; shift ;;
+        --url)               [[ $# -ge 2 ]] || usage; URL_FULL="$2"; shift 2 ;;
+        --api-key=*)         API_KEY="${1#*=}"; shift ;;
+        --api-key)           [[ $# -ge 2 ]] || usage; API_KEY="$2"; shift 2 ;;
+        --thinking=*)        THINKING="${1#*=}"; shift ;;
+        --thinking)          [[ $# -ge 2 ]] || usage; THINKING="$2"; shift 2 ;;
+        --thinking-format=*) THINK_FORMAT="${1#*=}"; shift ;;
+        --thinking-format)   [[ $# -ge 2 ]] || usage; THINK_FORMAT="$2"; shift 2 ;;
+        --image)             IMAGE_MODE=on; shift ;;
+        --no-image)          IMAGE_MODE=off; shift ;;
+        --probe)             PROBE=1; shift ;;
+        --detect-only)       DETECT_ONLY=1; shift ;;
+        --help|-h)           usage ;;
+        *)                   _rest+=("$1"); shift ;;
     esac
 done
 set -- "${_rest[@]}"
 
-# Make this point to your locally running model (or SSH-forwarded remote):
-URL=http://127.0.0.1:$PORT
-
 # Reuse shared parser for isolate.sh options
 . "$SCRIPT_DIR/parse-isolation-options-common.sh"
 
-# (a) Check/Launch host relay
-if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:$PORT" >/dev/null; then
-  echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
-  rm -f "$SOCK"
-  socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT 2>/dev/null &
-  SOCAT_PID=$!
-  # Give it a moment to bind
-  sleep 0.2
+BASE_URL="${URL_FULL:-http://127.0.0.1:$PORT}"
+USE_TUNNEL=1
+[[ -n "$URL_FULL" ]] && USE_TUNNEL=0
+
+# (a) Host relay (only for a locally served model on 127.0.0.1:$PORT)
+if (( USE_TUNNEL )); then
+  if ! pgrep -f "socat UNIX-LISTEN:$SOCK,fork TCP:127.0.0.1:$PORT" >/dev/null; then
+    echo "[+] Launching host socat relay to 127.0.0.1:$PORT..."
+    rm -f "$SOCK"
+    socat UNIX-LISTEN:"$SOCK",fork TCP:127.0.0.1:$PORT 2>/dev/null &
+    SOCAT_PID=$!
+    sleep 0.2
+  fi
+  trap '[[ -n ${SOCAT_PID:-} ]] && kill "$SOCAT_PID" 2>/dev/null; [[ -n ${SOCAT_PID:-} ]] && rm -f "$SOCK"' EXIT
 fi
-trap '[[ -n ${SOCAT_PID:-} ]] && kill "$SOCAT_PID" 2>/dev/null' EXIT
-
-# Query model info
-MODELS_JSON=$(curl -sf $URL/v1/models)
-# MODELS_JSON=$(curl -sf http://127.0.0.1:8081/v1/models)   # direct to llama-server
-if [ $? -ne 0 ] || [ -z "$MODELS_JSON" ]; then
-  echo "[-] Could not reach model server at $URL - is it running?"
-  exit 1
-fi
-
-
-# Try to get props for context size
-PROPS_JSON=$(curl -sf $URL/props || echo "{}")
-# PROPS_JSON=$(curl -sf http://127.0.0.1:8081/props || echo "{}")  # direct to llama-server
-
-read -r MODEL_ID CTX_SIZE < <(python3 -c "
-import sys, json
-try:
-    models_data = json.loads(sys.argv[1])
-    props_data = json.loads(sys.argv[2])
-
-    model = models_data['data'][0]
-    model_id = model['id']
-
-    # 1. Try vLLM style
-    ctx_size = model.get('max_model_len')
-    if ctx_size is None:
-        ctx_size = model.get('meta', {}).get('n_ctx')
-
-    # 2. Try llama.cpp nested style (default_generation_settings -> n_ctx)
-    if ctx_size is None:
-        ctx_size = props_data.get('default_generation_settings', {}).get('n_ctx')
-
-    # 2. Try llama.cpp ds4 style
-    if ctx_size is None:
-        try:
-            ctx_size = model.get('context_length')
-        except:
-            ctx_size = None
-
-    # 3. Try llama.cpp top-level style (n_ctx)
-    if ctx_size is None:
-        ctx_size = props_data.get('n_ctx')
-
-    # 4. Fallback
-    if ctx_size is None:
-        ctx_size = 8192
-
-    print(f'{model_id} {int(ctx_size)}')
-except Exception:
-    print('unknown-model 8192')
-" "$MODELS_JSON" "$PROPS_JSON")
-
-MAX_TOKENS=$CTX_SIZE
-echo "[+] Model: $MODEL_ID  |  Context: $CTX_SIZE  |  MaxTokens: $MAX_TOKENS"
-
-sleep 1
 
 mkdir -p ~/.pi/agent/
 
-IMAGE=""
-if [[ "$MODEL_ID" == *"Qwen3.8-Flash-Next"* || \
-      "$MODEL_ID" == *"GLM"* ]]; then
-    IMAGE=',"image"'
-fi
-
-if [[ "$MODEL_ID" == *"deepseek"* || \
-      "$MODEL_ID" == *"Qwen3.8-Flash-Next"* || \
-      "$MODEL_ID" == *"GLM"* ]]; then
-  echo "[+] Detected reasoning model"
-  cat > ~/.pi/agent/models.json << EOF
-{
-  "providers": {
-    "local-vllm": {
-      "baseUrl": "http://127.0.0.1:8080/v1",
-      "api": "openai-completions",
-      "apiKey": "dummy",
-      "compat": {
-        "supportsStore": false,
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": true,
-        "supportsUsageInStreaming": true,
-        "maxTokensField": "max_tokens",
-        "supportsStrictMode": false,
-        "thinkingFormat": "deepseek",
-        "requiresReasoningContentOnAssistantMessages": true
-      },
-      "models": [
-        {
-          "id": "$MODEL_ID",
-          "name": "$MODEL_ID (local vllm)",
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "off": null,
-            "minimal": "low",
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "xhigh"
-          },
-          "input": [
-            "text"$IMAGE
-          ],
-          "contextWindow": $CTX_SIZE,
-          "maxTokens": $MAX_TOKENS,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        }
-      ]
-    }
-  }
-}
-EOF
+# (b) Auto-detect model capabilities and write models.json
+DETECT_ARGS=(--base-url "$BASE_URL"
+             --output "$HOME/.pi/agent/models.json"
+             --thinking "$THINKING"
+             --thinking-format "$THINK_FORMAT"
+             --image-mode "$IMAGE_MODE")
+if (( USE_TUNNEL )); then
+    # pi inside the sandbox talks to the inner socat, which listens on 8080.
+    DETECT_ARGS+=(--sandbox-base-url "http://127.0.0.1:8080")
 else
-  cat > ~/.pi/agent/models.json << EOF
-{
-  "providers": {
-    "local-vllm": {
-      "baseUrl": "http://127.0.0.1:8080/v1",
-      "api": "openai-completions",
-      "apiKey": "dummy",
-      "compat": {
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
-      },
-      "models": [
-        {
-          "id": "$MODEL_ID",
-          "name": "$MODEL_ID (local vllm)",
-          "input": ["text", "image"],
-          "contextWindow": $CTX_SIZE,
-          "maxTokens": $MAX_TOKENS,
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
-        }
-      ]
-    }
-  }
-}
-EOF
+    DETECT_ARGS+=(--sandbox-base-url "$URL_FULL")
 fi
+(( PROBE )) && DETECT_ARGS+=(--probe)
+[[ -n "$API_KEY" ]] && DETECT_ARGS+=(--api-key "$API_KEY")
 
-# (b) Launch isolate.sh with internal socat bridge
-ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/" --rw "$SOCK")
+# ---- embedded detector (standalone; no external .py needed) ----
+python3 - "${DETECT_ARGS[@]}" <<'PYDET'
+#!/usr/bin/env python3
+"""
+pi_isolated_detect.py — auto-detect capabilities of an OpenAI-compatible
+model server (vLLM, llama.cpp, LM Studio, Google OpenAI-compat, ...) and
+emit ~/.pi/agent/models.json for pi.
+
+Detects / derives:
+  * model id, context window, max tokens
+  * whether the model is a reasoning model
+  * which thinking "wire format" the server accepts (openai reasoning_effort,
+    deepseek thinking{}, qwen chat_template_kwargs.enable_thinking, zai, together)
+  * which pi thinking levels (off/minimal/low/medium/high/xhigh) make sense
+    for the model family (each family differs!)
+  * vision (image) input support
+
+Strategy:
+  1. Model-family table (name patterns) -> per-family thinkingLevelMap etc.
+  2. Server hints (/props of llama.cpp: parse_reasoning, model_path, ...)
+  3. Optional live probe (--probe): send one short completion per wire style
+     and see which style actually yields reasoning content; also check whether
+     "off" is possible (always-thinking models get "off": null).
+
+Everything can be overridden from the command line.
+"""
+
+import argparse
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+
+LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"]
+
+# ---------------------------------------------------------------------------
+# Model-family table.
+# Each entry: (family, regex, reasoning, thinking_format,
+#              supports_reasoning_effort, level_map, requires_reasoning_content,
+#              vision_hint)
+# level_map only lists NON-default entries:
+#   omitted key        -> level supported, provider default mapping
+#   "level": "value"   -> level supported, send "value" to provider
+#   "level": None      -> level unsupported (hidden in pi UI)
+# ---------------------------------------------------------------------------
+FAMILIES = [
+    ("gpt-oss",       r"gpt[-_]oss",
+        True, "openai", True,
+        {"off": None, "xhigh": None},          # supports minimal/low/medium/high only
+        False, False),
+
+    ("deepseek-r1",   r"deepseek[-_]r1|\br1[-_]distill\b|deepseek[-_]oss",
+        True, "deepseek", True,
+        {"off": None,                           # R1 always thinks
+         "minimal": "low", "low": "low", "medium": "medium",
+         "high": "high", "xhigh": "max"},
+        True, False),
+
+    ("deepseek",      r"deepseek",
+        True, "deepseek", True,
+        {"minimal": "low", "xhigh": "max"},     # V3-style: low/medium/high/max + off
+        True, False),
+
+    ("qwq",           r"qwq",
+        True, "qwen-chat-template", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},   # always-thinking
+        False, False),
+
+    ("qwen3-thinking", r"qwen3?.*thinking|thinking.*qwen3?",
+        True, "qwen-chat-template", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},   # always-thinking
+        False, False),
+
+    ("qwen3",         r"qwen[-_ ]?3",
+        True, "qwen-chat-template", True,
+        {"minimal": "low", "xhigh": "high"},    # hybrid: off via enable_thinking=false
+        False, False),
+
+    ("qwen",          r"qwen",
+        False, None, False,
+        None,
+        False, False),
+
+    ("glm-thinking",  r"glm[-_ ]?(4\.[56]|5)|chatglm.*think",
+        True, "zai", True,
+        {"minimal": "low", "xhigh": "high"},    # hybrid thinking
+        False, False),
+
+    ("glm",           r"glm|chatglm",
+        True, "zai", True,
+        {"minimal": "low", "xhigh": "high"},
+        False, False),
+
+    ("kimi-thinking", r"kimi.*think|k1\.5",
+        True, "openai", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},
+        False, False),
+
+    ("phi-reason",    r"phi[-_]?\d+.*reason|deepseek.*phil",
+        True, "openai", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},
+        False, False),
+
+    ("magistral",     r"magistral|mistral.*reason",
+        True, "openai", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},
+        False, False),
+
+    ("gemini-pro",    r"gemini.*pro",
+        True, "openai", True,
+        {"off": None, "minimal": "low", "xhigh": "high"},   # Pro always thinks
+        False, True),
+
+    ("gemini-flash",  r"gemini.*flash",
+        True, "openai", True,
+        {"minimal": "low", "xhigh": "high"},
+        False, True),
+
+    ("gemma",         r"gemma",
+        False, None, False,
+        None,
+        False, True),
+
+    ("llama",         r"llama",
+        False, None, False,
+        None,
+        False, False),
+]
+
+VISION_PATTERN = (r"\bvl\b|vision|\bvlm\b|omni|pixtral|internvl|minicpm[-_]v"
+                  r"|gemma[-_]3|llama[-_]4|glm[-_]4v|\bv\b(?=[-_])")
+
+# Wire styles probed with --probe: (enable_payload, disable_payload)
+PROBE_STYLES = {
+    "openai":             ({"reasoning_effort": "high"},
+                           {"reasoning_effort": "none"}),
+    "qwen-chat-template": ({"chat_template_kwargs": {"enable_thinking": True}},
+                           {"chat_template_kwargs": {"enable_thinking": False}}),
+    "deepseek":           ({"thinking": {"type": "enabled"},
+                            "reasoning_effort": "high"},
+                           {"thinking": {"type": "disabled"}}),
+    "zai":                ({"thinking": {"type": "enabled"}},
+                           {"thinking": {"type": "disabled"}}),
+    "together":           ({"reasoning": {"enabled": True}},
+                           {"reasoning": {"enabled": False}}),
+}
+
+PROBE_PROMPT = ("A farmer has 17 sheep. All but 9 run away. A trader then "
+                "trades them at 12 copper each and loses 38. How many are "
+                "left, and was it a good deal? Reason step by step.")
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def http_json(url, api_key=None, timeout=15, payload=None):
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def safe_get(base, path, api_key, timeout=10):
+    try:
+        return http_json(base.rstrip("/") + path, api_key, timeout)
+    except Exception:
+        return None
+
+
+def extract_reasoning(msg):
+    for k in ("reasoning", "reasoning_content", "reasoning_details"):
+        v = msg.get(k)
+        if isinstance(v, str) and v.strip():
+            return True
+    return False
+
+
+def family_for(model_id):
+    low = model_id.lower()
+    for (fam, rx, reasoning, fmt, sre, lmap, rrc, vision) in FAMILIES:
+        if re.search(rx, low):
+            return dict(family=fam, reasoning=reasoning, fmt=fmt,
+                        supports_reasoning_effort=sre,
+                        level_map=dict(lmap) if lmap else None,
+                        requires_reasoning_content=rrc, vision_hint=vision)
+    # Fallback heuristic on the name alone
+    reasoning = bool(re.search(r"think|reason|\br1\b|cot\b", low))
+    return dict(family="generic", reasoning=reasoning,
+                fmt="openai" if reasoning else None,
+                supports_reasoning_effort=reasoning,
+                level_map=None,
+                requires_reasoning_content=False, vision_hint=False)
+
+
+def detect_context(models_data, props):
+    model = (models_data or {}).get("data", [{}])[0]
+    ctx = (model.get("max_model_len")
+           or model.get("meta", {}).get("n_ctx")
+           or model.get("context_length"))
+    if ctx is None and props:
+        ctx = (props.get("default_generation_settings", {}).get("n_ctx")
+               or props.get("n_ctx"))
+    return int(ctx) if ctx else 8192
+
+
+def safe_get_text(base, path, api_key, timeout=10):
+    try:
+        req = urllib.request.Request(base.rstrip("/") + path)
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode(errors="replace")
+    except Exception:
+        return None
+
+
+def detect_vision(model_id, props, family, image_mode, metrics=None):
+    if image_mode == "on":
+        return True
+    if image_mode == "off":
+        return False
+    # vLLM registers vllm:mm_cache_* / vllm:mm_inputs_* metrics only for
+    # multimodal models -> authoritative, no name guessing needed.
+    if metrics and re.search(r"vllm:mm_(cache|inputs|items)", metrics):
+        return True
+    low = model_id.lower()
+    if re.search(VISION_PATTERN, low):
+        return True
+    if props:
+        blob = json.dumps(props).lower()
+        if "mmproj" in blob or "vision" in blob:
+            return True
+    return bool(family["vision_hint"])
+
+
+def probe(base, model_id, api_key):
+    """Live-probe which wire style elicits reasoning, and whether off works.
+    Returns (confirmed_fmt or None, thinking_always_on or None)."""
+    def ask(extra):
+        payload = {"model": model_id, "temperature": 0,
+                   "max_tokens": 128,
+                   "messages": [{"role": "user", "content": PROBE_PROMPT}]}
+        payload.update(extra)
+        try:
+            resp = http_json(base.rstrip("/") + "/v1/chat/completions",
+                             api_key, timeout=60, payload=payload)
+            return extract_reasoning(resp["choices"][0]["message"])
+        except Exception:
+            return None
+
+    results = {style: ask(enable) for style, (enable, _dis) in PROBE_STYLES.items()}
+
+    winners = [s for s, v in results.items() if v is True]
+    if not winners:
+        return None, None
+    fmt = winners[0]
+    # Does it keep thinking even when we try to disable it, via the same style?
+    off = ask(PROBE_STYLES[fmt][1])
+    always_on = True if off is True else None
+    return fmt, always_on
+
+
+def probe_vision(base, model_id, api_key):
+    """Send a 1-pixel image; True if the server accepts multimodal content,
+    False if it rejects it, None if inconclusive/unreachable."""
+    px = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf"
+          "FcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    payload = {"model": model_id, "max_tokens": 8, "messages": [{
+        "role": "user",
+        "content": [{"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": px}}]}]}
+    try:
+        http_json(base.rstrip("/") + "/v1/chat/completions",
+                  api_key, timeout=60, payload=payload)
+        return True
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode(errors="replace").lower()
+        except Exception:
+            pass
+        if e.code == 400 and any(w in body for w in
+                                 ("image", "multimodal", "vision", "modality",
+                                  "not supported", "do not support")):
+            return False
+        return None
+    except Exception:
+        return None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base-url", required=True)
+    ap.add_argument("--sandbox-base-url", default="",
+                    help="Base URL to write into models.json (may differ from "
+                         "the URL we query, e.g. through the socat tunnel)")
+    ap.add_argument("--output", required=True)
+    ap.add_argument("--api-key", default="")
+    ap.add_argument("--thinking", choices=["auto", "on", "off"], default="auto")
+    ap.add_argument("--thinking-format",
+                    choices=["auto", "openai", "openrouter", "deepseek",
+                             "together", "zai", "qwen", "qwen-chat-template"],
+                    default="auto")
+    ap.add_argument("--image-mode", choices=["auto", "on", "off"], default="auto")
+    ap.add_argument("--probe", action="store_true")
+    args = ap.parse_args()
+
+    base = args.base_url.rstrip("/")
+    models = safe_get(base, "/v1/models", args.api_key)
+    if not models or not models.get("data"):
+        log(f"[x] Could not read {base}/v1/models")
+        sys.exit(1)
+    model_id = models["data"][0]["id"]
+    props = safe_get(base, "/props", args.api_key)          # llama.cpp
+    version = safe_get(base, "/version", args.api_key)      # vLLM
+    server = ("vllm" if version else
+              "llama.cpp" if props else "openai-compatible")
+
+    fam = family_for(model_id)
+    ctx = detect_context(models, props)
+    metrics = safe_get_text(base, "/metrics", args.api_key)
+    vision = detect_vision(model_id, props, fam, args.image_mode, metrics)
+
+    # llama.cpp hints override the name heuristic
+    if props and props.get("parse_reasoning"):
+        fam["reasoning"] = True
+        if fam["fmt"] is None:
+            fam["fmt"] = "openai"
+            fam["supports_reasoning_effort"] = True
+
+    # User overrides
+    if args.thinking == "off":
+        fam["reasoning"] = False
+    elif args.thinking == "on":
+        fam["reasoning"] = True
+        if fam["fmt"] is None:
+            fam["fmt"] = "openai"
+            fam["supports_reasoning_effort"] = True
+    if args.thinking_format != "auto" and fam["reasoning"]:
+        fam["fmt"] = args.thinking_format
+
+    # Live probe
+    if args.probe:
+        if fam["reasoning"]:
+            log("[*] Live-probing reasoning wire styles (a few requests)...")
+            fmt, always_on = probe(base, model_id, args.api_key)
+            if fmt:
+                log(f"[+] Probe: server accepts thinking via '{fmt}'")
+                fam["fmt"] = fmt
+                if always_on:
+                    log("[+] Probe: model keeps thinking even when disabled "
+                        "-> hiding 'off'")
+                    if fam["level_map"] is None:
+                        fam["level_map"] = {}
+                    fam["level_map"]["off"] = None
+            else:
+                log("[*] Probe: no style produced reasoning content; "
+                    "keeping table guess")
+        if args.image_mode == "auto":
+            log("[*] Live-probing vision (1-pixel image request)...")
+            v = probe_vision(base, model_id, args.api_key)
+            if v is True:
+                log("[+] Probe: server accepts image input -> vision on")
+                vision = True
+            elif v is False:
+                log("[+] Probe: server rejects image input -> vision off")
+                vision = False
+            else:
+                log("[*] Probe: vision result inconclusive; keeping "
+                    "metrics/name guess")
+
+    # Build models.json
+    out_base = (args.sandbox_base_url or base).rstrip("/")
+    provider_name = ("local-vllm" if "127.0.0.1" in out_base or "localhost" in out_base
+                     else "openai-compatible")
+    suffix = "local vllm" if provider_name == "local-vllm" else server
+
+    model_cfg = {
+        "id": model_id,
+        "name": f"{model_id} ({suffix})",
+        "input": ["text", "image"] if vision else ["text"],
+        "contextWindow": ctx,
+        "maxTokens": ctx,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    }
+
+    if fam["reasoning"]:
+        compat = {
+            "supportsStore": False,
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": bool(fam["supports_reasoning_effort"]),
+            "supportsUsageInStreaming": True,
+            "maxTokensField": "max_tokens",
+            "supportsStrictMode": False,
+            "thinkingFormat": fam["fmt"],
+        }
+        if fam["fmt"] in ("deepseek", "zai") or fam["requires_reasoning_content"]:
+            compat["requiresReasoningContentOnAssistantMessages"] = True
+        model_cfg["reasoning"] = True
+        model_cfg["compat"] = compat
+        if fam["level_map"] is not None:
+            # Only include known levels
+            model_cfg["thinkingLevelMap"] = {
+                k: v for k, v in fam["level_map"].items() if k in LEVELS
+            }
+    else:
+        model_cfg["reasoning"] = False
+        model_cfg["compat"] = {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": False,
+        }
+
+    cfg = {"providers": {provider_name: {
+        "baseUrl": f"{out_base}/v1",
+        "api": "openai-completions",
+        "apiKey": args.api_key or "dummy",
+        "models": [model_cfg],
+    }}}
+
+    with open(args.output, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+
+    # Summary
+    def enabled_levels():
+        if not fam["reasoning"]:
+            return []
+        m = fam["level_map"] or {}
+        return [l for l in LEVELS if m.get(l, "x") is not None]
+
+    log(f"[+] Server: {server}  |  Model: {model_id}")
+    log(f"[+] Context: {ctx}  |  Vision: {'yes' if vision else 'no'}")
+    if fam["reasoning"]:
+        log(f"[+] Reasoning: yes  |  family: {fam['family']}  |  "
+            f"thinkingFormat: {fam['fmt']}  |  "
+            f"reasoning_effort: {fam['supports_reasoning_effort']}")
+        log(f"[+] Thinking levels: {', '.join(enabled_levels()) or '(default all)'}")
+    else:
+        log("[+] Reasoning: no")
+    log(f"[+] Wrote {args.output}")
+
+
+if __name__ == "__main__":
+    main()
+PYDET
+
+
+(( DETECT_ONLY )) && exit 0
+
+# (c) Launch isolate.sh (with internal socat bridge when tunnelled)
+ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/")
+(( USE_TUNNEL )) && ISOLATE_ARGS+=(--rw "$SOCK")
 for s in "${SERVERS_FILES[@]}"; do ISOLATE_ARGS+=(--servers "$s"); done
 [[ -n "$DNS_CSV" ]] && ISOLATE_ARGS+=(--dns "$DNS_CSV")
 for p in "${RW_PATHS[@]}"; do ISOLATE_ARGS+=(--rw "$p"); done
@@ -219,7 +583,11 @@ for p in "${HIDE_PATHS[@]}"; do ISOLATE_ARGS+=(--hide "$p"); done
 (( PRIVATE_DEV )) || ISOLATE_ARGS+=(--host-dev)
 
 APP_ARGS=$(printf '%q ' "${APP[@]}")
-INNER_CMD="socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline $APP_ARGS"
+if (( USE_TUNNEL )); then
+    INNER_CMD="socat TCP-LISTEN:8080,fork UNIX-CONNECT:\"$SOCK\" 2>/dev/null & pi --offline $APP_ARGS"
+else
+    INNER_CMD="pi --offline $APP_ARGS"
+fi
 
 if [[ " ${APP[*]} " == *" -p "* || " ${APP[*]} " == *" --print "* ]]; then
     isolate.sh "${ISOLATE_ARGS[@]}" bash -c "$INNER_CMD"
