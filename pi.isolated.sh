@@ -146,8 +146,10 @@ Everything can be overridden from the command line.
 """
 
 import argparse
+import http.client
 import json
 import re
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -358,9 +360,35 @@ def detect_vision(model_id, props, family, image_mode, metrics=None):
     return bool(family["vision_hint"])
 
 
+class ProbeConnError(Exception):
+    """Raised when --probe requests never get a valid HTTP answer.
+    Covers the 'dead relay' trap: a socat/ssh -L listener on the port
+    accepts connections even when the real model server behind it is
+    down, so the client sees connection-reset / hang / empty-response
+    instead of connection-refused. In that case we must abort, not
+    silently fall back to table guesses."""
+
+
+def _is_conn_error(e):
+    # An actual HTTP response (even 4xx/5xx) proves the server is alive.
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    # Empty/malformed status line or RemoteDisconnected: accepted socket,
+    # no usable answer -> dead relay behind the listener.
+    if isinstance(e, (http.client.BadStatusLine,
+                      http.client.RemoteDisconnected,
+                      http.client.IncompleteRead)):
+        return True
+    return isinstance(e, (urllib.error.URLError,
+                          ConnectionError, socket.timeout, TimeoutError))
+
+
 def probe(base, model_id, api_key):
     """Live-probe which wire style elicits reasoning, and whether off works.
-    Returns (confirmed_fmt or None, thinking_always_on or None)."""
+    Returns (confirmed_fmt or None, thinking_always_on or None).
+    Raises ProbeConnError if no probe request got a valid HTTP response."""
+    answered = [0]  # count of requests that got any HTTP-level answer
+
     def ask(extra):
         payload = {"model": model_id, "temperature": 0,
                    "max_tokens": 128,
@@ -369,14 +397,24 @@ def probe(base, model_id, api_key):
         try:
             resp = http_json(base.rstrip("/") + "/v1/chat/completions",
                              api_key, timeout=60, payload=payload)
+            answered[0] += 1
             return extract_reasoning(resp["choices"][0]["message"])
-        except Exception:
+        except urllib.error.HTTPError:
+            answered[0] += 1        # server answered -> alive; not thinking
+            return False
+        except Exception as e:
+            if _is_conn_error(e):
+                raise ProbeConnError(f"{type(e).__name__}: {e}")
             return None
 
-    results = {style: ask(enable) for style, (enable, _dis) in PROBE_STYLES.items()}
+    results = {style: ask(enable)
+               for style, (enable, _dis) in PROBE_STYLES.items()}
 
     winners = [s for s, v in results.items() if v is True]
     if not winners:
+        if answered[0] == 0 or all(v is None for v in results.values()):
+            raise ProbeConnError("no probe request received a valid HTTP "
+                                 "response (dead relay / wrong port?)")
         return None, None
     fmt = winners[0]
     # Does it keep thinking even when we try to disable it, via the same style?
@@ -409,7 +447,9 @@ def probe_vision(base, model_id, api_key):
                                   "not supported", "do not support")):
             return False
         return None
-    except Exception:
+    except Exception as e:
+        if _is_conn_error(e):
+            raise ProbeConnError(f"{type(e).__name__}: {e}")
         return None
 
 
@@ -464,11 +504,19 @@ def main():
     if args.thinking_format != "auto" and fam["reasoning"]:
         fam["fmt"] = args.thinking_format
 
-    # Live probe
+    # Live probe.  Any request that fails to reach the server at all (or
+    # gets reset/hung/empty by a dead socat/ssh -L relay on the port)
+    # aborts with non-zero exit instead of launching on table guesses.
     if args.probe:
         if fam["reasoning"]:
             log("[*] Live-probing reasoning wire styles (a few requests)...")
-            fmt, always_on = probe(base, model_id, args.api_key)
+            try:
+                fmt, always_on = probe(base, model_id, args.api_key)
+            except ProbeConnError as e:
+                log(f"[x] --probe: model server unreachable while probing "
+                    f"thinking styles ({e})")
+                log("[x] Aborting - not launching pi on unverified guesses.")
+                sys.exit(1)
             if fmt:
                 log(f"[+] Probe: server accepts thinking via '{fmt}'")
                 fam["fmt"] = fmt
@@ -483,7 +531,13 @@ def main():
                     "keeping table guess")
         if args.image_mode == "auto":
             log("[*] Live-probing vision (1-pixel image request)...")
-            v = probe_vision(base, model_id, args.api_key)
+            try:
+                v = probe_vision(base, model_id, args.api_key)
+            except ProbeConnError as e:
+                log(f"[x] --probe: model server unreachable while probing "
+                    f"vision ({e})")
+                log("[x] Aborting - not launching pi on unverified guesses.")
+                sys.exit(1)
             if v is True:
                 log("[+] Probe: server accepts image input -> vision on")
                 vision = True
@@ -568,7 +622,10 @@ def main():
 if __name__ == "__main__":
     main()
 PYDET
-
+rc=$?
+if (( rc != 0 )); then
+    die "Model detection failed against $BASE_URL (detector exit $rc) - is the model server really up (a socat/ssh relay can answer on the port even when the backend is dead)? Or override with --thinking / --thinking-format / --image. NOT launching pi."
+fi
 
 (( DETECT_ONLY )) && exit 0
 
