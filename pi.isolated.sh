@@ -205,12 +205,12 @@ FAMILIES = [
         False, False),
 
     ("glm-thinking",  r"glm[-_ ]?(4\.[56]|5)|chatglm.*think",
-        True, "zai", True,
-        {"minimal": "low", "xhigh": "high"},    # hybrid thinking
+        True, "qwen-chat-template", True,   # vLLM: enable_thinking kwarg; zai
+        {"minimal": "low", "xhigh": "high"},   # style is z.ai-cloud-only!
         False, False),
 
     ("glm",           r"glm|chatglm",
-        True, "zai", True,
+        True, "qwen-chat-template", True,
         {"minimal": "low", "xhigh": "high"},
         False, False),
 
@@ -268,6 +268,13 @@ PROBE_STYLES = {
                            {"reasoning": {"enabled": False}}),
 }
 
+# Preference order when several styles give full on/off control: explicit
+# chat-template switches (enable_thinking) are the unambiguous enable/disable
+# for GLM-4.5+/Qwen3 on vLLM and llama.cpp, while 'reasoning_effort' merely
+# sizes the thinking budget on several servers - it only wins if nothing
+# stronger is proven.
+STYLE_PREF = ("qwen-chat-template", "openai", "deepseek", "zai", "together")
+
 PROBE_PROMPT = ("A farmer has 17 sheep. All but 9 run away. A trader then "
                 "trades them at 12 copper each and loses 38. How many are "
                 "left, and was it a good deal? Reason step by step.")
@@ -319,8 +326,48 @@ def family_for(model_id):
                 requires_reasoning_content=False, vision_hint=False)
 
 
-def detect_context(models_data, props):
-    model = (models_data or {}).get("data", [{}])[0]
+def root_family_token(root):
+    """Family implied by the weights path ('root') of a served model.
+    HF-cache paths look like .../models--<org>--<name>/snapshots/<hash>."""
+    if not isinstance(root, str) or "models--" not in root:
+        return (family_for(root or "") or {}).get("family", "generic")
+    segs = [s for s in root.split("/") if s.startswith("models--")]
+    if not segs:
+        return "generic"
+    name = segs[0][len("models--"):].replace("--", "/")
+    return family_for(name)["family"]
+
+
+def choose_model_id(models_data):
+    """Pick the model id to key everything on.
+
+    vLLM (without --served-model-name) advertises a generic alias 'serve'
+    *before* the real repo id; blind data[0] picking then defeats every
+    name-based family heuristic ('serve' matches nothing -> the model looks
+    like an incapable generic).  Score each candidate: recognised family from
+    the id itself (+2), recognised family from the weights path (+1), plus a
+    small bonus per id character (real repo ids carry org/model).  Ties keep
+    the server's own order."""
+    rows = (models_data or {}).get("data") or []
+    if not rows:
+        return None
+
+    def score(m):
+        s = 0.0
+        mid = m.get("id") or ""
+        if family_for(mid)["family"] != "generic":
+            s += 2.0
+        if root_family_token(m.get("root")) != "generic":
+            s += 1.0
+        return s + len(mid) / 1000.0
+
+    return max(rows, key=score).get("id")
+
+
+def detect_context(models_data, props, model_id=None):
+    rows = (models_data or {}).get("data") or []
+    model = next((r for r in rows if r.get("id") == model_id),
+                 rows[0] if rows else {})
     ctx = (model.get("max_model_len")
            or model.get("meta", {}).get("n_ctx")
            or model.get("context_length"))
@@ -384,43 +431,72 @@ def _is_conn_error(e):
 
 
 def probe(base, model_id, api_key):
-    """Live-probe which wire style elicits reasoning, and whether off works.
+    """Live-probe which wire style elicits reasoning, and whether the same
+    style can switch it back off.
+
+    A style only counts as usable when its enable payload demonstrably
+    produces reasoning (a 400/extra-params rejection is 'unknown', NOT 'no
+    thinking'), and full control is only credited when its disable payload
+    demonstrably yields NO reasoning.  This matters: e.g. vLLM-serving GLM
+    accepts the zai 'thinking:{type:...}' body without error but ignores it,
+    so the style that lights thinking on cannot turn it off.
+
     Returns (confirmed_fmt or None, thinking_always_on or None).
     Raises ProbeConnError if no probe request got a valid HTTP response."""
     answered = [0]  # count of requests that got any HTTP-level answer
 
     def ask(extra):
         payload = {"model": model_id, "temperature": 0,
-                   "max_tokens": 128,
+                   "max_tokens": 256,
                    "messages": [{"role": "user", "content": PROBE_PROMPT}]}
         payload.update(extra)
         try:
             resp = http_json(base.rstrip("/") + "/v1/chat/completions",
-                             api_key, timeout=60, payload=payload)
+                             api_key, timeout=90, payload=payload)
             answered[0] += 1
             return extract_reasoning(resp["choices"][0]["message"])
         except urllib.error.HTTPError:
-            answered[0] += 1        # server answered -> alive; not thinking
-            return False
+            answered[0] += 1        # server alive, but rejected the payload
+            return None             # -> style unusable, NOT 'thinking off'
         except Exception as e:
             if _is_conn_error(e):
                 raise ProbeConnError(f"{type(e).__name__}: {e}")
             return None
 
-    results = {style: ask(enable)
-               for style, (enable, _dis) in PROBE_STYLES.items()}
+    results = {}
+    for style, (enable, disable) in PROBE_STYLES.items():
+        on = ask(enable)
+        results[style] = (on, ask(disable) if on is True else None)
+        log(f"[*] Probe '{style}': on={results[style][0]} "
+            f"off={results[style][1]}")
 
-    winners = [s for s, v in results.items() if v is True]
-    if not winners:
-        if answered[0] == 0 or all(v is None for v in results.values()):
-            raise ProbeConnError("no probe request received a valid HTTP "
-                                 "response (dead relay / wrong port?)")
-        return None, None
-    fmt = winners[0]
-    # Does it keep thinking even when we try to disable it, via the same style?
-    off = ask(PROBE_STYLES[fmt][1])
-    always_on = True if off is True else None
-    return fmt, always_on
+    # 1st preference: a style that demonstrably toggles reasoning both ways.
+    # Chat-template switches are the unambiguous on/off control for GLM-4.5+ /
+    # Qwen3 on vLLM & llama.cpp; 'reasoning_effort' only sizes the thinking
+    # budget on several servers, so it loses ties.
+    for style in STYLE_PREF:
+        on, off = results.get(style, (None, None))
+        if on is True and off is False:
+            log(f"[+] Probe: '{style}' turns thinking ON and OFF "
+                f"(full control)")
+            return style, False                  # not always-on
+    # 2nd: any style that elicits reasoning, even if 'off' is unprovable --
+    # scanned in STYLE_PREF order, like the tier above (styles added to
+    # PROBE_STYLES without STYLE_PREF can never be selected; register both).
+    for style in STYLE_PREF:
+        on, off = results.get(style, (None, None))
+        if on is True:
+            if off is True:
+                log(f"[+] Probe: '{style}' turns thinking on, but the model "
+                    f"keeps thinking even when asked to disable -> always-on")
+                return style, True
+            log(f"[+] Probe: '{style}' turns thinking on; "
+                f"'off' could not be proven -> keeping it anyway")
+            return style, None
+    if answered[0] == 0:
+        raise ProbeConnError("no probe request received a valid HTTP "
+                             "response (dead relay / wrong port?)")
+    return None, None
 
 
 def probe_vision(base, model_id, api_key):
@@ -475,14 +551,22 @@ def main():
     if not models or not models.get("data"):
         log(f"[x] Could not read {base}/v1/models")
         sys.exit(1)
-    model_id = models["data"][0]["id"]
+    model_id = choose_model_id(models)
+    if not model_id:
+        log(f"[x] No model id advertised by {base}/v1/models")
+        sys.exit(1)
+    ids = [m.get("id") for m in models.get("data", [])]
+    if len(ids) > 1:
+        log(f"[*] Server advertises multiple models: {ids}")
+        log(f"[*] Chose '{model_id}' (best family match, skips generic "
+            f"aliases like the bare 'serve')")
     props = safe_get(base, "/props", args.api_key)          # llama.cpp
     version = safe_get(base, "/version", args.api_key)      # vLLM
     server = ("vllm" if version else
               "llama.cpp" if props else "openai-compatible")
 
     fam = family_for(model_id)
-    ctx = detect_context(models, props)
+    ctx = detect_context(models, props, model_id)
     metrics = safe_get_text(base, "/metrics", args.api_key)
     vision = detect_vision(model_id, props, fam, args.image_mode, metrics)
 
@@ -518,7 +602,10 @@ def main():
                 log("[x] Aborting - not launching pi on unverified guesses.")
                 sys.exit(1)
             if fmt:
-                log(f"[+] Probe: server accepts thinking via '{fmt}'")
+                if always_on is not True:
+                    log(f"[+] Probe: thinking is wired via '{fmt}' "
+                        f"(on{', off' if always_on is False else ''} "
+                        f"verified)")
                 fam["fmt"] = fmt
                 if always_on:
                     log("[+] Probe: model keeps thinking even when disabled "
