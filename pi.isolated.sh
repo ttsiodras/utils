@@ -577,11 +577,16 @@ def main():
             compat["requiresReasoningContentOnAssistantMessages"] = True
         model_cfg["reasoning"] = True
         model_cfg["compat"] = compat
-        if fam["level_map"] is not None:
-            # Only include known levels
-            model_cfg["thinkingLevelMap"] = {
-                k: v for k, v in fam["level_map"].items() if k in LEVELS
-            }
+        # Materialise the full level map so models.json is self-documenting:
+        # pi's tristate says 'omitted = supported via provider default', but
+        # that is invisible/fragile to read, so spell out every supported
+        # effort level (level -> same-name effort) and keep nulls for the
+        # unsupported ones.  'off' is only listed when explicitly disabled
+        # (null) or explicitly mapped; support is conveyed by its absence.
+        lm = dict(fam["level_map"]) if fam["level_map"] is not None else {}
+        for lvl in ("minimal", "low", "medium", "high", "xhigh"):
+            lm.setdefault(lvl, lvl)
+        model_cfg["thinkingLevelMap"] = {k: lm[k] for k in LEVELS if k in lm}
     else:
         model_cfg["reasoning"] = False
         model_cfg["compat"] = {
