@@ -124,8 +124,16 @@ sleep 1
 
 mkdir -p ~/.pi/agent/
 
-if [[ "$MODEL_ID" == *"deepseek"* ]]; then
-  echo "[+] Detected deepseek reasoning model: using deepseek compat (sizes from vLLM)"
+IMAGE=""
+if [[ "$MODEL_ID" == *"Qwen3.8-Flash-Next"* || \
+      "$MODEL_ID" == *"GLM"* ]]; then
+    IMAGE=',"image"'
+fi
+
+if [[ "$MODEL_ID" == *"deepseek"* || \
+      "$MODEL_ID" == *"Qwen3.8-Flash-Next"* || \
+      "$MODEL_ID" == *"GLM"* ]]; then
+  echo "[+] Detected reasoning model"
   cat > ~/.pi/agent/models.json << EOF
 {
   "providers": {
@@ -157,7 +165,7 @@ if [[ "$MODEL_ID" == *"deepseek"* ]]; then
             "xhigh": "xhigh"
           },
           "input": [
-            "text"
+            "text"$IMAGE
           ],
           "contextWindow": $CTX_SIZE,
           "maxTokens": $MAX_TOKENS,
@@ -189,7 +197,6 @@ else
         {
           "id": "$MODEL_ID",
           "name": "$MODEL_ID (local vllm)",
-          "reasoning": false,
           "input": ["text", "image"],
           "contextWindow": $CTX_SIZE,
           "maxTokens": $MAX_TOKENS,
