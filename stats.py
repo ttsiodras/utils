@@ -58,13 +58,15 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
         variance = 0.
     srted = sorted(allOfThem)
     if summaryOnly:
-        s = g_green + ("%6.2f" % (total/n)) + " +/- " + "%6.2f%%" + g_normal
-        print(s % ((100*math.sqrt(variance)*n/total) if total > 0 else 0.), end=' ')
+        mean = total/n
+        s = g_green + ("%6.2f" % mean) + " +/- " + "%6.2f%%" + g_normal
+        print(s % ((100*math.sqrt(variance)/abs(mean)) if mean != 0. else 0.), end=' ')
     else:
         print("\n", g_yellow+label+g_normal, ":")
         samplesNo = len(allOfThem)
+        mean = total/n
         measurements = [
-            ("Average value", total/n),
+            ("Average value", mean),
             ("Std deviation", math.sqrt(varianceFull)),
             ("Sample stddev", math.sqrt(variance)),
             ("Median",
@@ -74,8 +76,8 @@ def printStatsOfList(results, label='Statistics', summaryOnly=False):
             ("Min", srted[0]),
             ("Max", srted[-1]),
             ("Samples", samplesNo),
-            (g_green+"Overall", (str(total/n)+" +/- "+"%2.1f%%"+g_normal) %
-                ((100*math.sqrt(variance)*n/total) if total > 0 else 0.))
+            (g_green+"Overall", (str(mean)+" +/- "+"%2.1f%%"+g_normal) %
+                ((100*math.sqrt(variance)/abs(mean)) if mean != 0. else 0.))
         ]
         for label, value in measurements:
             print("%*s:" % (15, label), end=' ')
