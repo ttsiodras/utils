@@ -12,7 +12,8 @@ def computeRate(input_video):
         'ID_VIDEO_FPS']
     values = {}
     cmd = "mplayer -identify -frames 0 -vo null {} 2>/dev/null"
-    cmd = cmd.format(shlex.quote(input_video))
+    escaped = shlex.quote(input_video)
+    cmd = cmd.format(escaped)
     for line in os.popen(cmd).readlines():
         for key in keys:
             if line.startswith(key):
@@ -27,6 +28,10 @@ def computeRate(input_video):
                 continue
             print("Failed to find %s for %s" % (key, input_video))
             return -1
+    if values['ID_LENGTH'] == 0.0:
+        cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
+        values['ID_LENGTH'] = float(os.popen(cmd + ' {}'.format(escaped)).readlines()[0])
+
     file_size = os.stat(input_video).st_size
     w, h, t, aud_bps, fps = [values.get(k,0.0) for k in keys]
     if w*h*fps*t == 0.0:
