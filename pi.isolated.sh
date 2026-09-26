@@ -646,7 +646,6 @@ def main():
         "name": f"{model_id} ({suffix})",
         "input": ["text", "image"] if vision else ["text"],
         "contextWindow": ctx,
-        "maxTokens": ctx,
         "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
     }
 

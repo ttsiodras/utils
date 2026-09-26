@@ -29,8 +29,7 @@ ctx_size = model.get('max_model_len', 8192)
 print(model_id, ctx_size)
 ")
 
-MAX_TOKENS=$CTX_SIZE
-echo "[+] Model: $MODEL_ID  |  Context: $CTX_SIZE  |  MaxTokens: $MAX_TOKENS"
+echo "[+] Model: $MODEL_ID  |  Context: $CTX_SIZE"
 
 TMPDIR_PI=$(mktemp -d)
 cat > "$TMPDIR_PI/models.json" << EOF
@@ -50,7 +49,6 @@ cat > "$TMPDIR_PI/models.json" << EOF
           "name": "$MODEL_ID (local vllm)",
           "input": ["text", "image"],
           "contextWindow": $CTX_SIZE,
-          "maxTokens": $MAX_TOKENS,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         }
       ]
