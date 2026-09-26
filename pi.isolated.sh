@@ -103,7 +103,32 @@ fi
 
 mkdir -p ~/.pi/agent/
 
-# (b) Auto-detect model capabilities and write models.json
+# (b) Optional hook: PI_CATALOGUE_TOOL may name a deployment-specific
+# configurator, which deliberately lives outside this repo.  If it configures
+# the model (exit 0) the embedded detector below is skipped entirely; unset, or
+# a non-zero exit, leaves that behaviour exactly as it was.
+CATALOGUE_TOOL="${PI_CATALOGUE_TOOL:-}"
+SELECTED=0
+if [[ -n "$CATALOGUE_TOOL" && -f "$CATALOGUE_TOOL" ]] && command -v python3 >/dev/null 2>&1; then
+    echo "[+] consulting $CATALOGUE_TOOL for $BASE_URL"
+    SELECT_ARGS=(--base-url "$BASE_URL" --install "$HOME/.pi/agent/models.json")
+    if (( USE_TUNNEL )); then
+        # pi lives in the sandbox; it dials the inner socat, not the public port
+        SELECT_ARGS+=(--base-url-out "http://127.0.0.1:8080")
+    else
+        SELECT_ARGS+=(--base-url-out "$URL_FULL")
+    fi
+    if python3 "$CATALOGUE_TOOL" select "${SELECT_ARGS[@]}"; then
+        SELECTED=1
+    else
+        echo "[!] $CATALOGUE_TOOL declined to configure this endpoint;"
+        echo "    falling back to the embedded detector"
+    fi
+else
+    echo "[+] ${CATALOGUE_TOOL:-PI_CATALOGUE_TOOL} not usable; using the embedded detector"
+fi
+
+if (( SELECTED == 0 )); then
 DETECT_ARGS=(--base-url "$BASE_URL"
              --output "$HOME/.pi/agent/models.json"
              --thinking "$THINKING"
@@ -717,6 +742,8 @@ rc=$?
 if (( rc != 0 )); then
     die "Model detection failed against $BASE_URL (detector exit $rc) - is the model server really up (a socat/ssh relay can answer on the port even when the backend is dead)? Or override with --thinking / --thinking-format / --image. NOT launching pi."
 fi
+
+fi          # SELECTED == 0 (catalogue did not configure it)
 
 (( DETECT_ONLY )) && exit 0
 

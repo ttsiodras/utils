@@ -32,6 +32,21 @@ print(model_id, ctx_size)
 echo "[+] Model: $MODEL_ID  |  Context: $CTX_SIZE"
 
 TMPDIR_PI=$(mktemp -d)
+# Optional hook, as in pi.isolated.sh: a non-zero exit, or the variable being
+# unset, falls through to the minimal heredoc below.
+CATALOGUE_TOOL="${PI_CATALOGUE_TOOL:-}"
+if [[ -n "$CATALOGUE_TOOL" && -f "$CATALOGUE_TOOL" ]] && \
+   python3 "$CATALOGUE_TOOL" select \
+       --base-url http://localhost:8081 \
+       --base-url-out http://172.17.0.1:8080 \
+       --install "$TMPDIR_PI/models.json"; then
+  echo "[+] models.json from $CATALOGUE_TOOL"
+else
+  if [[ -n "$CATALOGUE_TOOL" && -f "$CATALOGUE_TOOL" ]]; then
+    echo "[!] $CATALOGUE_TOOL declined; using the minimal entry from /v1/models"
+  else
+    echo "[+] ${CATALOGUE_TOOL:-PI_CATALOGUE_TOOL} not usable; using the minimal entry from /v1/models"
+  fi
 cat > "$TMPDIR_PI/models.json" << EOF
 {
   "providers": {
@@ -56,6 +71,7 @@ cat > "$TMPDIR_PI/models.json" << EOF
   }
 }
 EOF
+fi
 
 echo "[-] Remember to:"
 echo "    socat TCP-LISTEN:8080,reuseaddr,fork,bind=172.17.0.1 TCP:localhost:8081"
