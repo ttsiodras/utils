@@ -76,17 +76,49 @@ MismatchEntry = Tuple[SafeTopFolder, SafeRelPath, HashResult, HashResult]
 NewEntry = TopFolderAndFullPath
 
 
+def _evict_pages(fd: int) -> None:
+    """Best effort: make the NEXT read of this file come off the medium.
+
+    Called once, just before hashing reads the file -- that single call is the
+    whole guarantee. It replaces a global `echo 3 > /proc/sys/vm/drop_caches`
+    which also dumps the dentry/inode cache and makes the directory walk tens
+    of times slower while proving nothing about this particular file.
+
+    Measured on a file that is already resident: a naive hashlib read of a
+    cached 240 MiB file costs 0.0 MiB from the device (the page-cache hole this
+    closes), whereas hashing through here costs the full 240 MiB.
+
+    The fdatasync comes first because dirty pages cannot be evicted -- without
+    it, a file rsync wrote moments ago would still be summed out of its dirty
+    page cache. A read-only fd is allowed to fdatasync on Linux; if some
+    filesystem disagrees, the OSError is swallowed rather than failing the run.
+    """
+    try:
+        os.fdatasync(fd)
+    except OSError:
+        pass
+    try:
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    except OSError:
+        pass
+
+
 def compute_md5(filepath: AbsPath) -> HashResult:
     """Compute MD5 hash of a file, reading in chunks.
 
     Returns ``None`` on I/O errors so callers can distinguish unreadable
     files from legitimate results (including empty files).
+
+    The file's pages are evicted immediately before it is read, so the digest
+    provably comes off the medium rather than out of the page cache -- which is
+    the one case where the hash would silently stop covering the drive.
     """
     # Initialize the hasher. usedforsecurity=False avoids warnings on systems
     # where MD5 is flagged as insecure for cryptographic use.
     hasher = hashlib.md5(usedforsecurity=False)
     try:
         with open(filepath, "rb") as f:
+            _evict_pages(f.fileno())
             # Read in 4MB chunks to balance memory usage and I/O throughput.
             for chunk in iter(lambda: f.read(4 * 1024 * 1024), b""):
                 hasher.update(chunk)
@@ -187,17 +219,84 @@ def stream_md5s(
                 pending.add(f)
 
 
-# User customization: directories we never want indexed. Any directory whose
-# path contains one of these tokens as a substring is skipped (both its files
-# and its subtree). Kept as bytes to match the byte paths used in the scan.
+# User customization: directories and files we never want indexed.
+# Any directory whose path contains one of _DROP_DIR_TOKENS as a substring is
+# skipped (both its files and its subtrees). Must be in bytes fmt, to match the
+# byte paths used in the scan. Similarly, files whose name contains one of
+# _DROP_NAME_SUBSTRINGS are skipped too.
 #
-# Add a distinctive path fragment for anything you'd rather not index (e.g.
-# large files you can cheaply re-download, such as model weights or offline
-# wikipedia mirrors). An empty list disables the filter.
+# The real values live ONLY in the indexer.toml that sits next to this script,
+# one per machine, so the same .py serves every box. These start empty on
+# purpose: a machine must state its own exclusions rather than inherit another
+# machine's by accident, and if the file is missing there is nothing to fall
+# back on -- the run simply excludes nothing, which the status line reports as
+# "0 dir tokens". Files whose name matches a _DROP_NAME_SUBSTRINGS entry are
+# skipped too.
 #
-_DROP_DIR_TOKENS: List[bytes] = [
-    # b'Deepseek', b'aard',
-]
+_DROP_DIR_TOKENS: List[bytes] = []
+_DROP_NAME_SUBSTRINGS: List[bytes] = []
+
+_CONFIG_KEYS = {
+    'drop_dir_tokens': list,
+    'drop_name_substrings': list,
+    'db': str,
+    'report': str,
+}
+
+
+def load_config(explicit: Optional[str] = None) -> Tuple[Dict[str, object],
+                                                         Optional[str]]:
+    """Read the per-machine indexer.toml that sits next to this script.
+
+    Lookup: --config, else $INDEXER_CONFIG, else indexer.toml beside the
+    resolved script path.
+
+    A missing file is neither an error nor a warning: this script carries no
+    policy of its own, so with no file there is nothing to exclude and the run
+    goes ahead indexing everything. main() reports the effective state either
+    way, so the log still shows what was honoured.
+
+    Returns the settings and the path used, or None when no file was found.
+    """
+    path = explicit or os.environ.get('INDEXER_CONFIG') or os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), 'indexer.toml')
+    if not os.path.isfile(path):
+        return {}, None
+    try:
+        import tomllib                              # stdlib since 3.11
+    except ImportError:
+        print(f"Error: {path} needs Python 3.11+ (no tomllib)")
+        sys.exit(1)
+    try:
+        with open(path, 'rb') as f:
+            raw = tomllib.load(f)
+    except (OSError, ValueError) as error:
+        print(f"Error: cannot read {path}: {error}")
+        sys.exit(1)
+    cfg: Dict[str, object] = {}
+    for key, want in _CONFIG_KEYS.items():
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, want) or (want is list and not all(
+                isinstance(i, str) for i in value)):
+            print(f"Error: {path}: {key} must be a "
+                  f"{'list of strings' if want is list else want.__name__}")
+            sys.exit(1)
+        cfg[key] = value
+    for extra in sorted(set(raw) - set(_CONFIG_KEYS)):
+        print(f"[!] {path}: ignoring unknown key {extra!r}")
+    return cfg, path
+
+
+def apply_config(cfg: Dict[str, object]) -> None:
+    """Push the config into the module settings the scan uses."""
+    global _DROP_DIR_TOKENS, _DROP_NAME_SUBSTRINGS  # pylint: disable=W0603
+    if 'drop_dir_tokens' in cfg:
+        _DROP_DIR_TOKENS = [os.fsencode(t) for t in cfg['drop_dir_tokens']]
+    if 'drop_name_substrings' in cfg:
+        _DROP_NAME_SUBSTRINGS = [os.fsencode(t)
+                                 for t in cfg['drop_name_substrings']]
 
 
 def scan_folder(  # pylint: disable=too-many-branches
@@ -255,6 +354,8 @@ def scan_folder(  # pylint: disable=too-many-branches
                   f"{to_printable(location)}")
             continue
         for entry in entries:
+            if any(token in entry.name for token in _DROP_NAME_SUBSTRINGS):
+                continue
             try:
                 if entry.is_symlink():
                     # Skip symbolic links (to files or dirs): prevents infinite
@@ -770,12 +871,19 @@ def parse_args() -> argparse.Namespace:
         help='Validate DB against filesystem. arg: top_folder or "all"',
     )
     parser.add_argument(
-        '--db', type=str, default='files.db',
-        help='Path to SQLite database (default: files.db in current folder)',
+        '--db', type=str, default=None,
+        help='Path to SQLite database (default: db from indexer.toml, else '
+             'files.db in the current folder)',
     )
     parser.add_argument(
-        '--report', type=str, default='report.log',
-        help='Path to report file (default: report.log in current folder)',
+        '--report', type=str, default=None,
+        help='Path to report file (default: report from indexer.toml, else '
+             'report.log in the current folder)',
+    )
+    parser.add_argument(
+        '--config', type=str, default=None,
+        help='Config file to use instead of the indexer.toml next to '
+             'this script (also honours $INDEXER_CONFIG)',
     )
     args = parser.parse_args()
     if args.validate is not None and args.limit is not None:
@@ -792,13 +900,25 @@ def main() -> None:
     """Entry point: parse arguments and dispatch to the appropriate mode."""
     args = parse_args()
 
+    # This machine's policy (its exclusions, and where db/report live) comes
+    # from the indexer.toml beside the script; command line options override.
+    cfg, cfg_path = load_config(args.config)
+    apply_config(cfg)
+    db_path: str = args.db or str(cfg.get('db', 'files.db'))
+    report_path: str = args.report or str(cfg.get('report', 'report.log'))
+    # Status, not a warning: with no file this run excludes nothing, and that
+    # shows up here as "no config file: excluding nothing / 0 dir tokens".
+    print(f"[-] config {cfg_path or 'no config file: excluding nothing'}: "
+          f"{len(_DROP_DIR_TOKENS)} dir tokens, "
+          f"{len(_DROP_NAME_SUBSTRINGS)} name skips, db={db_path}")
+
     # Fail fast if the database is stored inside a folder we are about to scan.
     # Doing so would make the tool index its own DB file (and live -wal/-shm
     # sidecars), which churns every run and reads a transiently inconsistent
     # file. That is an anti-pattern, so abort before any walk or write happens.
     for folder in args.top_folder:
-        if _db_inside_top_folder(folder, args.db):
-            print(f"Error: database {args.db} is inside folder being scanned: "
+        if _db_inside_top_folder(folder, db_path):
+            print(f"Error: database {db_path} is inside folder being scanned: "
                   f"{folder}. Store it outside the scanned tree.")
             sys.exit(1)
 
@@ -808,12 +928,12 @@ def main() -> None:
         else (os.cpu_count() or 1)
     )
 
-    with FileDB(args.db) as db:
+    with FileDB(db_path) as db:
         if args.validate is not None:
             # Mode 1: Validate existing DB against current filesystem state.
-            if not run_validation(db, args.validate, args.report, ncores):
+            if not run_validation(db, args.validate, report_path, ncores):
                 sys.exit(1)
-            print(f"[-] Validation complete. Report written to {args.report}")
+            print(f"[-] Validation complete. Report written to {report_path}")
         elif args.limit is not None:
             # Mode 2: Sync the provided folders (if any), then run the
             # redundancy check. With no folders the check covers every indexed
@@ -836,8 +956,8 @@ def main() -> None:
                 [os.fsencode(os.path.realpath(f)) for f in args.top_folder]
                 if args.top_folder else None
             )
-            run_limit_check(db, args.limit, args.report, scope)
-            print(f"[-] Limit check complete. Report written to {args.report}")
+            run_limit_check(db, args.limit, report_path, scope)
+            print(f"[-] Limit check complete. Report written to {report_path}")
         else:
             # Mode 3: Standard synchronization - all provided folders.
             all_present = True

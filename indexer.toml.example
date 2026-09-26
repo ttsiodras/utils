@@ -1,0 +1,22 @@
+# Example per-machine configuration for indexer.py
+#
+# Copy this file next to indexer.py as "indexer.toml" (the script reads that
+# one file, from the folder the script itself lives in) and set the values for
+# this machine. 
+#
+# If indexer.toml is absent the script still runs and excludes nothing -- it
+# deliberately carries no policy of its own.
+#
+# drop_dir_tokens      a directory is skipped, with its whole subtree, if its
+#                      path contains any of these as a substring. Use a
+#                      distinctive fragment of the path rather than a common
+#                      word, or unrelated folders vanish from the index too.
+# drop_name_substrings a file is skipped if its name contains any of these.
+# db, report           defaults for --db and --report; the command line still
+#                      overrides both.
+
+drop_dir_tokens = ["offline_wikipedia_mirror", "ai_model_weights", "scratch"]
+drop_name_substrings = ["preview_", ".deprecated"]
+
+# db = "files.db"
+# report = "report.log"
