@@ -16,6 +16,17 @@ pi:
 	  -f Dockerfile.base.pi \
 	  .
 
+# Alpine/musl variant. Tags ONLY pi-alpine -- never reuse the `pi` tag here,
+# the two images differ in libc (glibc vs musl) and koffi's native binary.
+pi-alpine:
+	docker build \
+	  --build-arg UID=$$(id -u) \
+	  --build-arg GID=$$(id -g) \
+	  --build-arg USERNAME=$$(whoami) \
+	  -t pi-alpine \
+	  -f Dockerfile.base.pi.alpine \
+	  .
+
 big:
 	# Build the GPT-OSS-120b claude code image
 	docker build \
