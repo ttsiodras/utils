@@ -1,20 +1,23 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
+"""
+Remnants of the distant past
+"""
 import os
 import sys
 import re
 import socket
-import string
 import random
 
 
 def mysystem(x):
     if 0 != os.system(x):
-        print "Failed while executing:\n" + x
-        exit(1)
+        print("Failed while executing:\n" + x)
+        sys.exit(1)
+
 
 if os.geteuid() != 0:
-    print "Only as root"
-    exit(1)
+    print("Only as root")
+    sys.exit(1)
 
 mysystem("modprobe dm_mod")
 mysystem("modprobe aes-generic")
@@ -24,8 +27,8 @@ if '-c' in sys.argv:
 else:
     clearup = False
     if len(sys.argv) != 3:
-        print "Usage:", sys.argv[0], "[-c] encryptedFileOrDev /path/to/mount"
-        exit(1)
+        print("Usage:", sys.argv[0], "[-c] encryptedFileOrDev /path/to/mount")
+        sys.exit(1)
 
 # Find all mounted cryptsetup stuff
 mounted = {}
@@ -51,14 +54,14 @@ for loopinfo in os.popen("losetup -a"):
         mysystem("losetup -d " + loopdev)
 
 if clearup:
-    exit(0)
+    sys.exit(0)
 
 # Use a fresh one for this mapping
 newLoopDev = os.popen("losetup -f").readlines()[0].strip()
 
 # Get pass
 try:
-    table = string.maketrans(
+    table = str.maketrans(
         'nopqrstuvwxyzabcdefghijklmNOPQRSTUVWXYZABCDEFGHIJKLM',
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')
     host = 'localhost'
@@ -68,13 +71,13 @@ try:
     s.connect((host, port))
     data = s.recv(size)
     s.close()
-    passwd = string.translate(data, table)
-except:
-    print "Gates are closed..."
-    exit(1)
+    passwd = data.decode('utf-8', 'ignore').translate(table)
+except Exception:
+    print("Gates are closed...")
+    sys.exit(1)
 
 newCryptDev = ""
-for i in xrange(0, 38):
+for i in range(0, 38):
     newCryptDev += random.choice("thequickbrownfoxjumpsoverthelazydog")
 mysystem("losetup " + newLoopDev + " " + sys.argv[1])
 mysystem(

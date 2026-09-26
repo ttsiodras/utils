@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
 
 # Copyright (c) 2007-2008 Mozilla Foundation
 #
@@ -20,14 +20,18 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
 # DEALINGS IN THE SOFTWARE.
 
-import httplib
+# 2to3-ported (httplib -> http.client, urlparse -> urllib.parse,
+# StringIO -> io, raw_input -> input, str.maketrans, print()).
+# Original upstream: Mozilla's html5cli.py, from the html5lib tree.
+
+import http.client
 import os
 import sys
 import re
-import urlparse
+import urllib.parse
 import string
 import gzip
-import StringIO
+import io
 
 extPat = re.compile(r'^.*\.([A-Za-z]+)$')
 extDict = {
@@ -52,13 +56,13 @@ service = 'http://html5.validator.nu/'
 
 for arg in argv:
   if '--help' == arg:
-    print '-h : force text/html'
-    print '-x : force application/xhtml+xml'
-    print '-g : GNU output'
-    print '-e : errors only (no info or warnings)'
-    print '--encoding=foo : declare encoding foo'
-    print '--service=url  : the address of the HTML5 validator'
-    print 'One file argument allowed. Leave out to read from stdin.' 
+    print('-h : force text/html')
+    print('-x : force application/xhtml+xml')
+    print('-g : GNU output')
+    print('-e : errors only (no info or warnings)')
+    print('--encoding=foo : declare encoding foo')
+    print('--service=url  : the address of the HTML5 validator')
+    print('One file argument allowed. Leave out to read from stdin.')
     sys.exit(0)
   elif arg.startswith("--encoding="):
     encoding = arg[11:]
@@ -98,8 +102,8 @@ elif fileName:
   m = extPat.match(fileName)
   if m:
     ext = m.group(1)
-    ext = ext.translate(string.maketrans(string.ascii_uppercase, string.ascii_lowercase))    
-    if extDict.has_key(ext):
+    ext = ext.translate(str.maketrans(string.ascii_uppercase, string.ascii_lowercase))
+    if ext in extDict:
       contentType = extDict[ext]
     else:
       sys.stderr.write('Unable to guess Content-Type from file name. Please force the type.\n')
@@ -117,11 +121,11 @@ if encoding:
 if fileName:
   inputHandle = open(fileName, "rb")
 else:
-  inputHandle = sys.stdin
+  inputHandle = sys.stdin.buffer
 
 data = inputHandle.read()
 
-buf = StringIO.StringIO()
+buf = io.BytesIO()
 gzipper = gzip.GzipFile(fileobj=buf, mode='wb')
 gzipper.write(data)
 gzipper.close()
@@ -145,19 +149,21 @@ if errorsOnly:
 while (status == 302 or status == 301 or status == 307) and redirectCount < 10:
   if redirectCount > 0:
     url = response.getheader('Location')
-  parsed = urlparse.urlsplit(url)
+  parsed = urllib.parse.urlsplit(url)
   if parsed[0] != 'http':
     sys.stderr.write('URI scheme %s not supported.\n' % parsed[0])
     sys.exit(7)    
   if redirectCount > 0:
     connection.close() # previous connection
-    print 'Redirecting to %s' % url
-    print 'Please press enter to continue or type "stop" followed by enter to stop.'
-    if raw_input() != "":
+    print('Redirecting to %s' % url)
+    print('Please press enter to continue or type "stop" followed by enter to stop.')
+    if input() != "":
       sys.exit(0)
-  connection = httplib.HTTPConnection(parsed[1])
+  connection = http.client.HTTPConnection(parsed[1])
   connection.connect()
   connection.putrequest("POST", "%s?%s" % (parsed[2], parsed[3]), skip_accept_encoding=1)
+  # Nu validator runs on Jetty, which rejects POSTs without a User-Agent (400).
+  connection.putheader("User-Agent", 'html5check.py')
   connection.putheader("Accept-Encoding", 'gzip')
   connection.putheader("Content-Type", contentType)
   connection.putheader("Content-Encoding", 'gzip')
@@ -173,14 +179,16 @@ if status != 200:
   sys.exit(5)
 
 if response.getheader('Content-Encoding', 'identity').lower() == 'gzip':
-  response = gzip.GzipFile(fileobj=StringIO.StringIO(response.read()))
+  response = gzip.GzipFile(fileobj=io.BytesIO(response.read()))
   
 if fileName and gnu:
-  quotedName = '"%s"' % fileName.replace('"', '\\042')
+  quotedName = ('"%s"' % fileName.replace('"', '\\042')).encode('utf-8')
   for line in response:
-    sys.stdout.write(quotedName)
-    sys.stdout.write(line)
+    sys.stdout.buffer.write(quotedName)
+    sys.stdout.buffer.write(line)
+  sys.stdout.buffer.flush()
 else:
-  sys.stdout.write(response.read())
+  sys.stdout.buffer.write(response.read())
+  sys.stdout.buffer.flush()
 
 connection.close()

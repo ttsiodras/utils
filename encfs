@@ -1,14 +1,14 @@
-#!/usr/bin/env python2
-# 
-# Stupid encfs needs absolute paths.
-#
+#!/usr/bin/env python3
+"""
+Stupid encfs needs absolute paths.
+"""
 import os
 import sys
 
 if 3 != len(sys.argv):
-    print "Usage:", sys.argv[0], "encFsDir mountDir"
+    print("Usage:", sys.argv[0], "encFsDir mountDir")
     sys.exit(1)
-absolutes = map(os.path.abspath, sys.argv)
+absolutes = list(map(os.path.abspath, sys.argv))
 sys.exit(
     os.system(
         '/usr/bin/encfs -o allow_root "' +

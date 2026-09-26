@@ -1324,7 +1324,7 @@ class dstat_net(dstat):
     def __init__(self):
         self.nick = ('recv', 'send')
         self.type = 'b'
-        self.totalfilter = re.compile(r'^(rlo|bond\d+|face|.+\.\d+)$')
+        self.totalfilter = re.compile(r'^(lo|bond\d+|face|.+\.\d+)$')
         self.open('/proc/net/dev')
         self.cols = 2
 

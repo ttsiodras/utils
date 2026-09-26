@@ -1,4 +1,6 @@
-#!/home/thanassis/bin/.scapy/bin/python3
+#!/usr/bin/env python3
+# Needs scapy: python3 -m venv ~/.venvs/scapy && ~/.venvs/scapy/bin/pip install scapy
+# (or just run it with an interpreter that can import scapy)
 import os
 import argparse
 

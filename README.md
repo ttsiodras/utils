@@ -120,7 +120,7 @@ find_dup_videos.py /path/to/videos/
 
 | Script | What it does |
 |---|---|
-| [`dstat`](dstat) | Enhanced `dstat` binary (system resource monitor) |
+| [`dstat`](dstat) | Vendored, locally patched `dstat` (system resource monitor); see [vendored code](#vendored-third-party-code) |
 | [`dstat.sh`](dstat.sh) | Wrapper: `dstat -clnv --fs --vm` |
 | [`stats.py`](stats.py) | Pipe in numbers → colored statistics (mean, stddev, median, min/max) |
 | [`statsLive.py`](statsLive.py) | Real-time mean+stddev over stdin stream (Welford's online algorithm) |
@@ -235,7 +235,7 @@ cat numbers.txt | histogram.py
 | [`htmlEntities.pl`](htmlEntities.pl) | HTML-encode text (Perl) |
 | [`unicodeUnescape.py`](unicodeUnescape.py) | Decode `\uXXXX` escape sequences |
 | [`hex2utf.py`](hex2utf.py) | Hex → UTF-8 converter |
-| [`mime_decoder_inplace_pipe.sh`](mime_decoder_inplace_pipe.sh) | Decode MIME-encoded files in-place |
+| [`mime_decoder_inplace_pipe.py`](mime_decoder_inplace_pipe.py) | Decode MIME-encoded files in-place |
 | [`epochToHuman.pl`](epochToHuman.pl) | Convert Unix epoch to human date |
 | [`tohex`](tohex) | Decimal → hex |
 | [`todec`](todec) | Hex → decimal |
@@ -279,6 +279,23 @@ cat numbers.txt | histogram.py
 | [`yq_outliers.sh`](yq_outliers.sh) | Flatten YAML to dot-notation for grepping |
 | [`x16.py`](x16.py) | GDB helper: dump 16-column memory (vs default 8) |
 | [`unchroot.pl`](unchroot.pl) | Break out of a chroot jail (security testing) |
+
+## Vendored third-party code
+
+Everything here is MIT-licensed (see [`LICENSE`](LICENSE)), **except** the files
+below, which are other people's work and keep their own upstream licence.
+
+| File | Upstream | Licence |
+|---|---|---|
+| [`dstat`](dstat) | [`dstat-real/dstat`](https://github.com/dstat-real/dstat) (formerly `dagwieers/dstat`, which redirects there) — archived, last commit 2020-06-18; the original homepage `dag.wieers.com` now answers HTTP 500. This copy is upstream `master` plus Python-3 compatibility fixes only (shebang, `collections.abc`, raw-string regex literals). The still-maintained Python-3 fork is [`scottchiefbaker/dool`](https://github.com/scottchiefbaker/dool). | GPL-2.0+ (upstream ships the text as `COPYING`) |
+| [`ansi2html.sh`](ansi2html.sh) | Pádraig Brady / [pixelbeat](https://www.pixelbeat.org/scripts/ansi2html.sh), also mirrored in [`pixelb/scripts`](https://github.com/pixelb/scripts) | LGPL-2.0 (per the file's own header) |
+| [`vimcat.sh`](vimcat.sh) | Matthew Wozniski's `AnsiHighlight`-based `vimcat`, mirrored at [`vim-scripts/vimcat`](https://github.com/vim-scripts/vimcat); actively maintained successor: [`ofavre/vimcat`](https://github.com/ofavre/vimcat). The file is a bash wrapper that sources itself as Vim script (`vim:ft=vim`). | BSD (per the file header, which asks to be credited) |
+| [`html5check.py`](html5check.py) | Client for the [Nu HTML checker](https://validator.nu/), defaulting to `http://html5.validator.nu/`. It sends a `User-Agent`, which that Jetty-based service requires (it answers `400 Bad Request` without one). Only `http://` endpoints are supported — `--service=https://…` exits with 7. | MIT (Mozilla Foundation header in the file) |
+
+### Contributions on record
+
+- [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) — contributed by Karanveer (commit `daee254`, Oct 2019).
+- [`rmdirRecursive.sh`](rmdirRecursive.sh) — carries the `-empty` fix contributed by Tim Stackhouse (commit `2d24eac`, Oct 2014).
 
 ## Dependencies
 
