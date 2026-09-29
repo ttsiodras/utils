@@ -34,10 +34,8 @@ blocking in place; then use it ever after.
 writable, and the only host reachable off-box is the one listed in
 `google-servers.txt`.
 
-`--network=restricted_net` is used by two scripts, one per container CLI:
-`../pi.containerized.vllm.sh` runs podman, which keeps its own network store, so
-`podman network create restricted_net` is needed once; `../cclog.sh` runs docker,
-whose `restricted_net` is created at boot by the dockerized-vim boot script
+`--network=restricted_net` is used by `../cclog.sh`, which runs docker; that
+`restricted_net` is created at boot by the dockerized-vim boot script
 (`~/.vim/Dockerized/rc.local.vim`).
 
     pi.subagent/AGENTS.md        subagent prompt used by ../pi_parse_stream.py
