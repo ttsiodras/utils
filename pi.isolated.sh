@@ -31,10 +31,16 @@ Usage: pi.isolated2.sh [OPTIONS] [-- pi OPTIONS]
 
 Model detection options:
   --port PORT              Local model port (default 8081)
-  --url URL                Full base URL of an OpenAI-compatible server
-                           (e.g. https://generativelanguage.googleapis.com/v1beta/openai/v1)
-                           Skips the local socat tunnel.
-  --api-key KEY            API key for --url (default: $GEMINI_API_KEY if set)
+  --url URL                Root base URL of a remote OpenAI-compatible server
+                           (e.g. https://generativelanguage.googleapis.com/v1beta/openai)
+                           "/v1/models" is appended to it, so do not add a
+                           trailing "/v1" yourself. Skips the local socat tunnel.
+  --api-key KEY            API key for --url (default: $GEMINI_API_KEY if set);
+                           exported into the sandbox as GEMINI_API_KEY for Google
+                           hosts, OPENAI_API_KEY for anything else.
+                           An option value sits in ps output for the lifetime of
+                           the session (/proc/PID/cmdline is world-readable), so
+                           prefer exporting the variable and omitting this flag.
   --thinking auto|on|off   Force reasoning on/off (default: auto-detect)
   --thinking-format FMT    Force thinking wire format:
                            auto|openai|openrouter|deepseek|together|zai|qwen|qwen-chat-template
@@ -748,6 +754,25 @@ fi          # SELECTED == 0 (catalogue did not configure it)
 (( DETECT_ONLY )) && exit 0
 
 # (c) Launch isolate.sh (with internal socat bridge when tunnelled)
+
+# A hosted endpoint needs its credential to reach pi inside the sandbox -- the
+# --api-key option is otherwise used only for model detection. firejail passes our
+# environment through, so exporting here is enough. Deliberately skipped for local
+# runs, so a real GEMINI_API_KEY never lands in a sandbox that has no business
+# holding it.
+if (( ! USE_TUNNEL )) && [[ -n "$API_KEY" ]]; then
+    _host="${URL_FULL#*://}"; _host="${_host%%/*}"; _host="${_host%%:*}"
+    case "$_host" in
+        googleapis.com|*.googleapis.com|google.com|*.google.com)
+            export GEMINI_API_KEY="$API_KEY"
+            echo "[+] exported GEMINI_API_KEY for the sandboxed pi" ;;
+        *)
+            export OPENAI_API_KEY="$API_KEY"
+            echo "[+] exported OPENAI_API_KEY for the sandboxed pi" ;;
+    esac
+    unset _host
+fi
+
 ISOLATE_ARGS=(--rw "$PWD" --rw "$HOME/.pi/")
 (( USE_TUNNEL )) && ISOLATE_ARGS+=(--rw "$SOCK")
 for s in "${SERVERS_FILES[@]}"; do ISOLATE_ARGS+=(--servers "$s"); done

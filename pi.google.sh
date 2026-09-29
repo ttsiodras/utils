@@ -17,7 +17,20 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 source "${SCRIPT_DIR}"/ai.google.key || exit 1
 
-podman run -w "$PWD" --rm -v "$PWD:$PWD" \
-    -e GOOGLE_AI_STUDIO_API_KEY="$KEY" \
-    -e GEMINI_API_KEY="$KEY" \
-    -it pi pi --model gemma-4-31b-it "$@"
+# Model is overridable: a model Google is 500-ing on is indistinguishable from a
+# hung session, because pi turns the server error into a silent auto-retry loop.
+MODEL="${MODEL:-gemma-4-26b-a4b-it}"
+
+# Sandboxed by pi.isolated.sh (isolate.sh + firejail): $HOME read-only, only $PWD
+# writable, and the only host reachable off-box is the one listed in
+# localAI/google-servers.txt. --url wants the *root* of the OpenAI-compatible
+# endpoint -- pi.isolated.sh appends /v1/models itself. The key goes in the
+# environment, not in --api-key: /proc/PID/cmdline is world-readable, so an option
+# would expose it for the lifetime of the session. pi.isolated.sh picks up
+# GEMINI_API_KEY on its own.
+export GEMINI_API_KEY="$KEY"
+exec "${SCRIPT_DIR}"/pi.isolated.sh \
+    --url https://generativelanguage.googleapis.com/v1beta/openai \
+    --servers "${SCRIPT_DIR}"/localAI/google-servers.txt \
+    --dns "${DNS:-1.1.1.1}" \
+    -- --model "$MODEL" "$@"

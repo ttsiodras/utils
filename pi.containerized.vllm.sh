@@ -80,7 +80,7 @@ cat > "$TMPDIR_PI/pi.AGENTS.md" << 'OEF'
 When spawning subagents for tasks that don't need an immediate result, always use `run_in_background: true`.
 OEF
 
-docker run --network=restricted_net \
+podman run --network=restricted_net \
   -w "$PWD" \
   --rm \
   $@ \

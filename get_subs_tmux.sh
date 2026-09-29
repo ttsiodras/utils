@@ -32,14 +32,16 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 # Create new tmux session (detached)
 tmux new-session -d -s "$SESSION" -c "$SCRIPT_DIR"
 
-# Launch pi interactively in the pane.
-# We mirror the docker configuration from pi.google_run.sh but remove --mode json and -p
-# to enter the interactive TUI mode.
-PI_CMD="source ai.google.key && \
-    podman run -w \$PWD --rm -v \$PWD:\$PWD \
-    -e NODE_NO_READLINE=1 -e FORCE_COLOR=1 \
-    -e GOOGLE_AI_STUDIO_API_KEY=\$KEY -e GEMINI_API_KEY=\$KEY \
-    -it pi pi --model gemma-4-31b-it"
+# Launch pi interactively in the pane, sandboxed by pi.isolated.sh -- the same
+# thing pi.google.sh does, minus --mode json and -p so pi stays in the TUI.
+# The pane already starts in SCRIPT_DIR, hence the relative paths. The key is
+# exported rather than passed as --api-key, so it never reaches a world-readable
+# /proc/PID/cmdline. The \$ escaping defers $KEY/$MODEL/$DNS expansion to the pane.
+PI_CMD="source ai.google.key && export GEMINI_API_KEY=\$KEY && ./pi.isolated.sh \
+    --url https://generativelanguage.googleapis.com/v1beta/openai \
+    --servers localAI/google-servers.txt \
+    --dns \${DNS:-1.1.1.1} \
+    -- --model \${MODEL:-gemma-4-26b-a4b-it}"
 
 tmux send-keys -t "$SESSION" "$PI_CMD" C-m
 

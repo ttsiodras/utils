@@ -110,13 +110,14 @@ find_dup_videos.py /path/to/videos/
 
 | Script | What it does |
 |---|---|
-| [`pi.isolated.sh`](pi.isolated.sh) | Primary launcher: sandboxed `pi` session with local LLM via Unix socket tunnel. Symlinked as [`pi.sh`](pi.sh) |
-| [`pi.google.sh`](pi.google.sh) | Pi launcher using Google AI Studio (Gemini) |
-| [`pi.google_run.sh`](pi.google_run.sh) | Interactive `pi` session in Docker, using the Google AI Studio key from `ai.google.key` |
-| [`pi.dockerized.vllm.sh`](pi.dockerized.vllm.sh) | Run pi in Docker, connect to vLLM server |
+| [`pi.isolated.sh`](pi.isolated.sh) | Primary launcher: sandboxed `pi` under `isolate.sh` -- local LLM over a Unix-socket tunnel, or a remote endpoint via `--url`. Symlinked as [`pi.sh`](pi.sh) |
+| [`pi.google.sh`](pi.google.sh) | Interactive `pi` TUI against Google AI Studio through `pi.isolated.sh` -- read-only `$HOME`, egress only to `localAI/google-servers.txt`; key from `ai.google.key` |
+| [`pi.google_run.sh`](pi.google_run.sh) | One-shot `pi` prompt against Google AI Studio (`--mode json -p`) through `pi.isolated.sh`; key from `ai.google.key` |
+| [`pi.containerized.vllm.sh`](pi.containerized.vllm.sh) | Interactive `pi` in a podman container on `restricted_net`, talking to a vLLM server; injects AGENTS.md + models.json, `$PWD` only |
 | [`pi_parse_stream.py`](pi_parse_stream.py) | See localAI/pi.subagent/AGENTS.md (streaming JSON/pi) |
 | [`pilog.sh`](pilog.sh) | Render a `~/.pi/agent/sessions` JSONL session as Markdown |
-| [`localAI/`](localAI/) | Dockerfiles, configs, and launch scripts for local LLM serving (vLLM, llama.cpp, etc.) |
+| [`cclog.sh`](cclog.sh) | Render a Claude Code session JSONL as Markdown with a containerized `cclog` Go tool |
+| [`localAI/`](localAI/) | Local LLM serving: llama.cpp launch scripts, recorded benchmark runs, pi subagent prompt and extensions, hosted-session allowlist |
 | [`Dockerfiles/`](Dockerfiles/) | Dockerfiles (e.g. the yt-dlp image, etc) |
 
 ### System monitoring & statistics

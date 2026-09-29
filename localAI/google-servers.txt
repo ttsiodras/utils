@@ -1,0 +1,11 @@
+# Network allowlist for hosted-model pi sessions.
+#
+# Input to ../isolate.sh --servers, passed on by ../pi.google.sh,
+# ../pi.google_run.sh and ../get_subs_tmux.sh. Inside the sandbox only loopback
+# plus the entries below are reachable; all other traffic is dropped. Entries are
+# hostnames, IPs or CIDRs; '#' starts a comment.
+#
+# Names are resolved once, at launch (getent ahostsv4 + ahostsv6). Google uses
+# Anycast, so a long-lived session can outlive the addresses it started with --
+# restart the session rather than editing this file if requests start failing.
+generativelanguage.googleapis.com

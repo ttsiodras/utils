@@ -1,43 +1,44 @@
-## Setup
+## Local LLM serving
 
-- **Build images**: `make`
-  - Builds both the GPT-OSS-120b and Qwen3-Next-80B-A3B docker images,
-    for use with `claude.gpt-oss-120b.sh` and `claude.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16.sh`.
+### A. Serving small local models with llama.cpp
 
-## Architecture
+    ./launch.sh                  menu: guardrails / model / backend
+                                 (Qwen3.5 9B Q4_K_M, Gemma4 12B QAT Q4_0 MTP, Vulkan)
+    launch_common.sh             shared llama-server args: 127.0.0.1:8081
+                                 --offline -ngl 99 --jinja --flash-attn on --mlock
 
-This is a Docker-based deployment system for driving local large language models (LLMs) with Claude Code, in a network-isolated setup.
+`127.0.0.1:8081` is the default `../pi.isolated.sh --port` expects.
 
-The architecture consists of:
+The launcher is meant to run in the end as a user whose egress drops (via
+`../block_user_via_iptables.sh`). Only the very first launch needs internet,
+to fetch the models from Hugging Face: run that one launch without the
+blocking in place; then use it ever after.
 
-1. **Base Image (Dockerfile.base.vllm)**:
-   - Uses Debian 12-slim as the base
-   - Installs Node.js, npm, and busybox (for debugging - e.g. to confirm there's no network access inside the container).
-   - Creates a non-root user with the same UID/GID as the user in the host system. When launched (e.g. `claude.gpt-oss-120b.sh`)
-     the file/folder access permissions will match.
-   - Installs Claude Code globally
-   - Sets up environment variables needed for network-isolated operation.
+### B. The much larger, LAN-hosted models
 
-2. **Model-Specific Images**:
-   - GPT-OSS-120b (Dockerfile.gpt-oss-120b.vllm): Extends base image with GPT-OSS-120b configuration
-   - Qwen3-Next-80B-A3B (Dockerfile.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16.vllm): Extends base image with Qwen3-Next-80B-A3B configuration
+    benchmarks/                  recorded runs (DeepSeek-v4 0731, Qwen3.5-122B/397B,
+                                 Gemma4-31b nvfp4+ray, Qwen3.6-27B-FP8, MiniMax-M2.7)
+    launch.openwebui.sh          open-webui UI against the vLLM endpoint on that box
 
-3. **Configuration Files**:
-   - settings.json.gpt-oss-120b: Configures GPT-OSS-120b model with endpoint at http://172.17.0.1:8000
-   - settings.json.dazipe.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16: Configures Qwen3-Next-80B-A3B model with endpoint at http://172.17.0.1:8000
-   - claude.json: Contains Claude Code onboarding state
+`launch.openwebui.sh` runs the upstream open-webui image under docker, so its
+`OPENAI_API_BASE_URL` uses `172.17.0.1`, docker's bridge gateway to the host
+(`host.containers.internal` under podman).
 
-The system uses the vLLM inference server x running at http://172.17.0.1:8000, with dummy API keys for local development.
-Both models are configured to use the same endpoint - see `serve_gpt_oss_120b_vllm.sh` and `serve_Qwen3_Next_80B_A3B_Instruct_GPTQ_Int4A16_vllm.sh`
-for details on how they are launched on a Strix Halo system.
+### C. Hosted-model sessions
 
-The entire system is built to guarantee network isolation:
+    google-servers.txt           network allowlist for these sessions, fed to
+                                 ../isolate.sh --servers
 
-- The `vllm` server runs from a user that has no network access (see `../block_user_via_iptables.sh`). Only the first launch needs to have access,
-  so it can download the model(s); in that first run, you need to comment out all the magic env vars prior to the `vllm` launch (in the `serve_...` scripts).
-- Claude Code runs in a network isolated container: both ` claude.gpt-oss-120b.sh` and `claude.Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16.sh`
-  launch the containers in a restricted_net Docker network,
-  [setup (for similar reasons) for isolating my Vim environment's language servers](https://github.com/ttsiodras/dotvim/blob/master/Dockerized/rc.local.vim).
-- The network only allows visibility to the local (or in my case, SSH-fwded) vLLM endpoint; so there's no need to trust anything about
-  the (closed-source) Claude Code and/or the npm jungle he lives in.
-- Appropriate settings are used for both `vllm` and Claude Code to make them both happy enough to run without network access.
+`../pi.google.sh`, `../pi.google_run.sh` and `../get_subs_tmux.sh` run `pi` through
+`../pi.isolated.sh` (isolate.sh + firejail): `$HOME` read-only, only `$PWD`
+writable, and the only host reachable off-box is the one listed in
+`google-servers.txt`.
+
+`--network=restricted_net` is used by two scripts, one per container CLI:
+`../pi.containerized.vllm.sh` runs podman, which keeps its own network store, so
+`podman network create restricted_net` is needed once; `../cclog.sh` runs docker,
+whose `restricted_net` is created at boot by the dockerized-vim boot script
+(`~/.vim/Dockerized/rc.local.vim`).
+
+    pi.subagent/AGENTS.md        subagent prompt used by ../pi_parse_stream.py
+    pi.extensions/               pi extensions (tokens-per-second)
