@@ -1,8 +1,8 @@
 #!/bin/bash
-# pi.isolated2.sh — like pi.isolated.sh, but model capabilities (in particular
-# the *thinking levels*, which differ per model family: gpt-oss, deepseek-r1,
-# qwen3, GLM, gemini, ...) are auto-detected by the embedded Python detector
-# (fully standalone - no external files) instead
+# pi.isolated.sh -- sandboxed `pi` launcher (isolate.sh + firejail) with
+# model-capability detection: the *thinking levels*, which differ per model
+# family (gpt-oss, deepseek-r1, qwen3, GLM, gemini, ...), are auto-detected by
+# the embedded Python detector (fully standalone -- no external files) instead
 # of being hardcoded.  Use --probe for a live probe of which reasoning wire
 # format the server actually honours.
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -27,7 +27,7 @@ SOCK="$HOME/llama.sock.$OUR_RANDOM_PID"
 die()      { echo "error: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-Usage: pi.isolated2.sh [OPTIONS] [-- pi OPTIONS]
+Usage: pi.isolated.sh [OPTIONS] [-- pi OPTIONS]
 
 Model detection options:
   --port PORT              Local model port (default 8081)

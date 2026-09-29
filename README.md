@@ -55,7 +55,7 @@ pi.isolated.sh [--port PORT] [isolate.sh options] [-- pi options]
 |---|---|
 | [`indexer.py`](indexer.py) | Scan folders, store MD5s in SQLite, detect changes. Parallel MD5 with `ProcessPoolExecutor` |
 | [`syncer.py`](syncer.py) | Cross-reference a new folder against an existing `indexer.db`: finds already-existing files (by MD5) and similar filenames (Levenshtein distance) |
-| [`vidir`](vidir) | Make the moreutils/vidir work properly with my isolated vim) |
+| [`vidir`](vidir) | Make the moreutils/vidir work properly with my isolated vim |
 | [`cmpDir1andDir2andRemoveIdenticalFromDir1`](cmpDir1andDir2andRemoveIdenticalFromDir1) | Remove from dir1 files that are identical (size+MD5) in dir2 |
 | [`cmpDir1andDir2andRemoveIdenticalFromDir1BasedOnSizeAndTimestamp`](cmpDir1andDir2andRemoveIdenticalFromDir1BasedOnSizeAndTimestamp) | Same, but uses size + timestamp (faster, no MD5) |
 
@@ -126,12 +126,12 @@ find_dup_videos.py /path/to/videos/
 |---|---|
 | [`dstat`](dstat) | Vendored, locally patched `dstat` (system resource monitor); see [vendored code](#vendored-third-party-code) |
 | [`dstat.sh`](dstat.sh) | Wrapper: `dstat -clnv --fs --vm` |
-| [`stats.py`](stats.py) | Pipe in numbers → colored statistics (mean, stddev, median, min/max) |
+| [`stats.py`](stats.py) | Pipe in numbers -> colored statistics (mean, stddev, median, min/max) |
 | [`statsLive.py`](statsLive.py) | Real-time mean+stddev over stdin stream (Welford's online algorithm) |
 | [`histogram.py`](histogram.py) | matplotlib histogram from a file/stdin (`-`); `-r` drops outliers, `-p out.png` for non-GUI output |
 | [`histogram.sh`](histogram.sh) | pipe to it to get text histogram and `datamash` percentiles (`-n` no histogram, `-r` ignore outliers) |
 | [`asciigraph.py`](asciigraph.py) | matplotlib line graph of a stdin data series, one number per line (title required as `$1`) |
-| [`asciigraph`](asciigraph) | text mode ASCII line graph — one number per line on stdin |
+| [`asciigraph`](asciigraph) | text mode ASCII line graph -- one number per line on stdin |
 | [`crystaldiskmark.sh`](crystaldiskmark.sh) | CrystalDiskMark clone for Linux using `fio` |
 | [`benchmark.nvme.via.io.uring.sh`](benchmark.nvme.via.io.uring.sh) | NVMe sequential read benchmark via `io_uring` |
 | [`percentile.sh`](percentile.sh) | Quick percentile calculator |
@@ -163,9 +163,8 @@ for i in {1..100}; do echo $i; done | asciigraph -h 20
 | [`sync_NIC_HW_timestamping_clock_from_host.py`](sync_NIC_HW_timestamping_clock_from_host.py) | Sync NIC hardware timestamp clock (phc2sys) for accurate tcpdump timestamps |
 | [`tcpdump2binary.py`](tcpdump2binary.py) | Extract raw Ethernet frames from a pcap into binary files (uses scapy) |
 | [`myip.sh`](myip.sh) | Show my public IP |
-| [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
 | [`nointernet.for.genymotion.sh`](nointernet.for.genymotion.sh) | Run Genymotion with no internet but a working private loopback (localhost adb only) |
-| [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | daemon; auto-plays video URLs found in the clipboard via `mpv`, hands `zathura: http…` URLs to Firefox |
+| [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | daemon; auto-plays video URLs found in the clipboard via `mpv`, hands `zathura: http...` URLs to Firefox |
 | [`yt-dlp.sh`](yt-dlp.sh) | Run yt-dlp safely (JS madness!) from inside a container that maps $PWD inside it |
 | [`SendAtWarp9`](SendAtWarp9) / [`ReceiveAtWarp9`](ReceiveAtWarp9) | Push files across a LAN: `tar \| lzop -1 \| nc` on one side, `nc -l \| lzop -d \| tar x` on the other, port 9656 |
 | [`SendAtWarp9r`](SendAtWarp9r) / [`ReceiveAtWarp9r`](ReceiveAtWarp9r) | Same transfer with the roles reversed -- the sender listens, the receiver connects |
@@ -190,10 +189,11 @@ for i in {1..100}; do echo $i; done | asciigraph -h 20
 | [`greedy.py`](greedy.py) | Pack files to maximally fit a target size |
 | [`lost_my_space.py`](lost_my_space.py) | Compares current fs against previous snapshot of file sizes (`-u` takes a new snapshot) |
 | [`lost_my_space.sh`](lost_my_space.sh) | wrapper around the .py: keeps the DB in `/root/bin.local`, then filters the output via `exclude.sh` |
+| [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
 | [`logDurations.py`](logDurations.py) | Parse timestamped logs and show duration of each run |
 | [`sortXML.py`](sortXML.py) | Sort XML elements while preserving structure |
-| [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) | CSV → styled HTML table (Bootstrap) |
-| [`csvToHTML_barebones.py`](csvToHTML_barebones.py) | CSV → minimal HTML table |
+| [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) | CSV -> styled HTML table (Bootstrap) |
+| [`csvToHTML_barebones.py`](csvToHTML_barebones.py) | CSV -> minimal HTML table |
 | [`excelToCsv.py`](excelToCsv.py) | Convert Excel (.xls/.xlsx) to CSV |
 | [`countMoviesLength.py`](countMoviesLength.py) | Sum total duration of video files in a folder |
 | [`rmdirRecursive.sh`](rmdirRecursive.sh) | Remove all empty directories recursively (post-cleanup) |
@@ -255,13 +255,12 @@ for i in {1..100}; do echo $i; done | asciigraph -h 20
 | [`ansi2html.sh`](ansi2html.sh) | Convert ANSI-colored terminal output to HTML |
 | [`htmlEntities.pl`](htmlEntities.pl) | HTML-encode text (Perl) |
 | [`unicodeUnescape.py`](unicodeUnescape.py) | Decode `\uXXXX` escape sequences |
-| [`hex2utf.py`](hex2utf.py) | Hex → UTF-8 converter |
+| [`hex2utf.py`](hex2utf.py) | Hex -> UTF-8 converter |
 | [`mime_decoder_inplace_pipe.py`](mime_decoder_inplace_pipe.py) | Decode MIME-encoded files in-place |
 | [`epochToHuman.pl`](epochToHuman.pl) | Convert Unix epoch to human date |
-| [`tohex`](tohex) | Decimal → hex |
-| [`todec`](todec) | Hex → decimal |
+| [`tohex`](tohex) | Decimal -> hex |
+| [`todec`](todec) | Hex -> decimal |
 | [`tozero.sh`](tozero.sh) | feed safely from a pipe to xargs -0 |
-| [`256color.pl`](256color.pl) | Display 256-color terminal palette |
 | [`href.pl`](href.pl) | Extract href links from HTML |
 | [`img.pl`](img.pl) | Extract img src links from HTML |
 | [`unescape.pl`](unescape.pl) | Decode URL-encoded (%XX) and HTML entities |
@@ -275,6 +274,7 @@ for i in {1..100}; do echo $i; done | asciigraph -h 20
 | [`zswapStatus.sh`](zswapStatus.sh) | Check zswap status |
 | [`hyperthreading`](hyperthreading) | Toggle hyperthreading |
 | [`brightScreen.sh`](brightScreen.sh) | Set backlight brightness to max |
+| [`256color.pl`](256color.pl) | Display 256-color terminal palette |
 | [`waitForCoolCPU.sh`](waitForCoolCPU.sh) | Wait until CPU temperature drops |
 | [`waitForProcToDie.pl`](waitForProcToDie.pl) | Wait for a process to exit, then run a command |
 | [`dumpMemoryOfPID.sh`](dumpMemoryOfPID.sh) | Dump all memory pages of a PID (as root) |
@@ -308,15 +308,18 @@ below, which are other people's work and keep their own upstream licence.
 
 | File | Upstream | Licence |
 |---|---|---|
-| [`dstat`](dstat) | [`dstat-real/dstat`](https://github.com/dstat-real/dstat) (formerly `dagwieers/dstat`, which redirects there) — archived, last commit 2020-06-18; the original homepage `dag.wieers.com` now answers HTTP 500. This copy is upstream `master` plus Python-3 compatibility fixes only (shebang, `collections.abc`, raw-string regex literals). The still-maintained Python-3 fork is [`scottchiefbaker/dool`](https://github.com/scottchiefbaker/dool). | GPL-2.0+ (upstream ships the text as `COPYING`) |
+| [`dstat`](dstat) | [`dstat-real/dstat`](https://github.com/dstat-real/dstat) (formerly `dagwieers/dstat`, which redirects there) -- archived, last commit 2020-06-18; the original homepage `dag.wieers.com` now answers HTTP 500. This copy is upstream `master` plus Python-3 compatibility fixes only (shebang, `collections.abc`, raw-string regex literals). The still-maintained Python-3 fork is [`scottchiefbaker/dool`](https://github.com/scottchiefbaker/dool). | GPL-2.0+ (upstream ships the text as `COPYING`) |
 | [`ansi2html.sh`](ansi2html.sh) | Pádraig Brady / [pixelbeat](https://www.pixelbeat.org/scripts/ansi2html.sh), also mirrored in [`pixelb/scripts`](https://github.com/pixelb/scripts) | LGPL-2.0 (per the file's own header) |
 | [`vimcat.sh`](vimcat.sh) | Matthew Wozniski's `AnsiHighlight`-based `vimcat`, mirrored at [`vim-scripts/vimcat`](https://github.com/vim-scripts/vimcat); actively maintained successor: [`ofavre/vimcat`](https://github.com/ofavre/vimcat). The file is a bash wrapper that sources itself as Vim script (`vim:ft=vim`). | BSD (per the file header, which asks to be credited) |
-| [`html5check.py`](html5check.py) | Client for the [Nu HTML checker](https://validator.nu/), defaulting to `http://html5.validator.nu/`. It sends a `User-Agent`, which that Jetty-based service requires (it answers `400 Bad Request` without one). Only `http://` endpoints are supported — `--service=https://…` exits with 7. | MIT (Mozilla Foundation header in the file) |
+| [`html5check.py`](html5check.py) | Client for the [Nu HTML checker](https://validator.nu/), defaulting to `http://html5.validator.nu/`. It sends a `User-Agent`, which that Jetty-based service requires (it answers `400 Bad Request` without one). Only `http://` endpoints are supported -- `--service=https://...` exits with 7. | MIT (Mozilla Foundation header in the file) |
+| [`256color.pl`](256color.pl) | Todd Larason's xterm colour test | not MIT (upstream xterm/XFree86) |
+| [`swap.usage.sh`](swap.usage.sh) | answer at [stackoverflow.com/q/479953](https://stackoverflow.com/questions/479953/how-to-find-out-which-processes-are-using-swap-space-in-linux) | CC-BY-SA (StackOverflow default), not MIT |
+| [`unchroot.pl`](unchroot.pl) | pentestmonkey's chroot-breakout script; the blog post is named in the file header | none stated in the file |
 
 ### Contributions on record
 
-- [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) — contributed by Karanveer (commit `daee254`, Oct 2019).
-- [`rmdirRecursive.sh`](rmdirRecursive.sh) — carries the `-empty` fix contributed by Tim Stackhouse (commit `2d24eac`, Oct 2014).
+- [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) -- contributed by Karanveer (commit `daee254`, Oct 2019).
+- [`rmdirRecursive.sh`](rmdirRecursive.sh) -- carries the `-empty` fix contributed by Tim Stackhouse (commit `2d24eac`, Oct 2014).
 
 ## Dependencies
 

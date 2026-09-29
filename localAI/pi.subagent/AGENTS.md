@@ -21,7 +21,7 @@ chmod +x /tmp/subagent/cmd.sh
 tmux new-window -n "subagent" "/tmp/subagent/cmd.sh ; echo __DONE__ >> /tmp/subagent/output.txt"
 ```
 
-Notice in the previous command there is a trainling double quote. Do not forget to emit it!
+Notice in the previous command there is a trailing double quote. Do not forget to emit it!
 
 **Wait for result:**
 ```bash
