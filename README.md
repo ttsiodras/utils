@@ -24,11 +24,11 @@ that is *definitely* recommended :-)
 | [`isolate.sh`](isolate.sh) | Firejail-based sandbox: network allowlisting, read-only `$HOME`, per-path rw/hide. The core isolation engine |
 | [`vimisolated.sh`](vimisolated.sh) | Launch vim inside `isolate.sh`, auto-detecting writable paths |
 | [`pi.isolated.sh`](pi.isolated.sh) | Run `pi` (AI coding agent) inside `isolate.sh`, tunneling through a Unix socket to reach a local LLM. Symlinked as [`pi.sh`](pi.sh) |
-| [`desert_island_container_execution.sh`](desert_island_container_execution.sh) | Run untrusted TCP server code in a Docker container that the host can reach, but the container can't reach outside the LAN |
-| [`dockerme.sh`](dockerme.sh) | Launch a Docker container with the current folder mapped, optional X11/PulseAudio passthrough, network toggle, root toggle |
+| [`desert_island_container_execution.sh`](desert_island_container_execution.sh) | Run untrusted TCP server code in a container with all outbound traffic dropped; the host reaches it on `127.0.0.1:<port>` |
+| [`dockerme.sh`](dockerme.sh) | Docker container with `$PWD` mapped to `/workdir` and X11/PulseAudio/DRI mounted; `-n` enables network, `-r` runs as root, `-p` exposes a port |
 | [`parse-isolation-options-common.sh`](parse-isolation-options-common.sh) | Shared argument parser for isolate.sh / pi.isolated.sh (sourced, not standalone) |
 
-Example usage of isolation (vimisolated.sh is much better, but this works as a basic example:
+Example usage of `isolate.sh` to isolate vim *(note that this is just a generic example of isolation, for isolating vim in particular, `vimisolated.sh` is much better)*:
 
 ```bash
 # Read-only $HOME, no network
@@ -37,6 +37,9 @@ isolate.sh -- vim ~/bin/pi.sh
 # Allow specific servers, make some paths writable, hide SSH keys from any vim-spawned subprocesses (Language servers, etc)
 isolate.sh --rw ~/bin --rw ~/.viminfo --hide ~/.ssh \
            --servers servers.txt --dns 1.1.1.1 -- vim ~/bin/pi.sh
+
+# ...so I built vimisolated.sh - auto-mapping of r/w folders, etc
+vimisolated.sh ~/bin/pi.sh
 ```
 
 Example usage of isolated pi.dev harness:
@@ -81,24 +84,25 @@ find_dup_videos.py /path/to/videos/
 |---|---|
 | [`minimalVideo.py`](minimalVideo.py) | Transcode any video to x264 at ~0.06 b/p, mux with original audio via mkvmerge |
 | [`minimalVideo265.py`](minimalVideo265.py) | Same concept, but using HEVC (x265) |
-| [`minimalVideoCRF_265.sh`](minimalVideoCRF_265.sh) | HEVC encode with CRF mode (quality-based), copy audio |
+| [`minimalVideoCRF_265.sh`](minimalVideoCRF_265.sh) | HEVC encode with CRF mode (quality-based), opus audio |
 | [`minimalVideoCRF_265_copy_audio.sh`](minimalVideoCRF_265_copy_audio.sh) | HEVC CRF encode, copy audio track directly |
 | [`minimalVideoCRF_265_forQuest.sh`](minimalVideoCRF_265_forQuest.sh) | HEVC CRF encode variant for VR headsets (Quest) |
-| [`vaapi_encode.sh`](vaapi_encode.sh) | VAAPI hardware-accelerated HEVC encode |
-| [`vaapi_encode.just_encode.sh`](vaapi_encode.just_encode.sh) | Minimal VAAPI HEVC encode (no rescaling) |
+| [`vaapi_encode.sh`](vaapi_encode.sh) | VAAPI HW-accelerating both decode + HEVC encode |
+| [`vaapi_encode.just_encode.sh`](vaapi_encode.just_encode.sh) | VAAPI HW-accelerated HEVC encode only |
+| [`vaapi_decode_in_SW_encode_in_HW.sh`](vaapi_decode_in_SW_encode_in_HW.sh) | Decode on CPU, upload frames to the GPU, HEVC-encode via VAAPI with opus audio |
 | [`cuda_encode_hevc.sh`](cuda_encode_hevc.sh) | NVENC HEVC encode (NVIDIA GPU) |
 | [`cuda_encode_av1.sh`](cuda_encode_av1.sh) | NVENC AV1 encode (NVIDIA GPU) |
 | [`fps_2x.sh`](fps_2x.sh) | Double frame-rate via VAAPI motion interpolation (60fps) |
 | [`fps_2x_vapoursynth/`](fps_2x_vapoursynth/) | Vapoursynth-based 2x FPS scripts |
 | [`any2mp3.sh`](any2mp3.sh) | Extract audio track to LAME mp3 from any media file |
-| [`transcode.sh`](transcode.sh) | Generic ffmpeg transcode wrapper |
-| [`show_video_bpp.py`](show_video_bpp.py) | Show bits-per-pixel stats for a video |
+| [`show_video_bpp.py`](show_video_bpp.py) | Show bits-per-pixel stats for a video; also invocable as `bpp` |
+| [`show_audio_bpp.sh`](show_audio_bpp.sh) | Print each file's audio bitrate next to its name; also invocable as `app` |
 | [`show_video_details.py`](show_video_details.py) | Dump codec/res/fps/bitrate of a video file |
 | [`m4a2aac.sh`](m4a2aac.sh) | Extract AAC from M4A container |
 | [`mpvYoutubeNoVideo.sh`](mpvYoutubeNoVideo.sh) | Play YouTube audio-only (no video, saves CPU) |
 | [`jpg2lep.sh`](jpg2lep.sh) | Lossless JPEG recompression via Dropbox Lepton |
 | [`png2webp.sh`](png2webp.sh) | Convert PNG to WebP via ffmpeg |
-| [`recordX11.sh`](recordX11.sh) | Losslessly compressed X11 screen recording |
+| [`recordX11.sh`](recordX11.sh) | Lossless X11 screen capture |
 | [`flashVideo.sh`](flashVideo.sh) | Extract flash video from browser plugin's pipe |
 | [`misc.py`](misc.py) | Shared utility module for video scripts |
 
@@ -108,12 +112,12 @@ find_dup_videos.py /path/to/videos/
 |---|---|
 | [`pi.isolated.sh`](pi.isolated.sh) | Primary launcher: sandboxed `pi` session with local LLM via Unix socket tunnel. Symlinked as [`pi.sh`](pi.sh) |
 | [`pi.google.sh`](pi.google.sh) | Pi launcher using Google AI Studio (Gemini) |
-| [`pi.google_run.sh`](pi.google_run.sh) | Quick one-shot Google AI Studio run |
-| [`pi.dockerized.vllm.sh`](pi.dockerized.vllm.sh) | Run vLLM model server in Docker, then launch pi connected to it |
-| [`pi_parse_stream.py`](pi_parse_stream.py) | Shared parser for pi's streaming JSON responses |
-| [`cclog.sh`](cclog.sh) | Run `cclog` Docker image to convert a JSONL conversation log to Markdown |
+| [`pi.google_run.sh`](pi.google_run.sh) | Interactive `pi` session in Docker, using the Google AI Studio key from `ai.google.key` |
+| [`pi.dockerized.vllm.sh`](pi.dockerized.vllm.sh) | Run pi in Docker, connect to vLLM server |
+| [`pi_parse_stream.py`](pi_parse_stream.py) | See localAI/pi.subagent/AGENTS.md (streaming JSON/pi) |
+| [`pilog.sh`](pilog.sh) | Render a `~/.pi/agent/sessions` JSONL session as Markdown |
 | [`localAI/`](localAI/) | Dockerfiles, configs, and launch scripts for local LLM serving (vLLM, llama.cpp, etc.) |
-| [`Dockerfiles/`](Dockerfiles/) | Dockerfiles for cclog and yt-dlp binary images |
+| [`Dockerfiles/`](Dockerfiles/) | Dockerfiles (e.g. the yt-dlp image, etc) |
 
 ### System monitoring & statistics
 
@@ -123,23 +127,30 @@ find_dup_videos.py /path/to/videos/
 | [`dstat.sh`](dstat.sh) | Wrapper: `dstat -clnv --fs --vm` |
 | [`stats.py`](stats.py) | Pipe in numbers → colored statistics (mean, stddev, median, min/max) |
 | [`statsLive.py`](statsLive.py) | Real-time mean+stddev over stdin stream (Welford's online algorithm) |
-| [`histogram.py`](histogram.py) | Generate histogram + percentiles from piped data |
-| [`histogram.sh`](histogram.sh) | Bash wrapper for histogram.py with outlier detection |
-| [`_histogram.py`](_histogram.py) | Internal histogram module |
-| [`asciigraph.py`](asciigraph.py) | ASCII line graph from piped data (matplotlib) |
+| [`histogram.py`](histogram.py) | matplotlib histogram from a file/stdin (`-`); `-r` drops outliers, `-p out.png` for non-GUI output |
+| [`histogram.sh`](histogram.sh) | pipe to it to get text histogram and `datamash` percentiles (`-n` no histogram, `-r` ignore outliers) |
+| [`asciigraph.py`](asciigraph.py) | matplotlib line graph of a stdin data series, one number per line (title required as `$1`) |
+| [`asciigraph`](asciigraph) | text mode ASCII line graph — one number per line on stdin |
 | [`crystaldiskmark.sh`](crystaldiskmark.sh) | CrystalDiskMark clone for Linux using `fio` |
 | [`benchmark.nvme.via.io.uring.sh`](benchmark.nvme.via.io.uring.sh) | NVMe sequential read benchmark via `io_uring` |
 | [`percentile.sh`](percentile.sh) | Quick percentile calculator |
-| [`barChartTimes.sh`](barChartTimes.sh) | Horizontal bar chart of execution times (from `time` output) |
-| [`performance`](performance) | Performance tuning wrapper |
-| [`ondemand`](ondemand) | CPU governor toggle (ondemand vs performance) |
+| [`performance`](performance) | Pin all CPU cores to the `performance` governor and disable ASLR before benchmarking; needs root |
+| [`ondemand`](ondemand) | Return cores to the load-based `powersave` governor and re-enable ASLR after benchmarking; needs root |
 
 ```bash
 # Colored stats
 for i in {1..100}; do echo $i; done | stats.py
 
+# Streaming data stats
+for i in {1..100} ; do echo $i ; sleep 1 ; done | statsLive.py
+Mean: 3.0000  StdDev: 1.4142 # updated live as data arrive
+
 # Histogram
-cat numbers.txt | histogram.py
+cat numbers.txt | histogram.py -      # matplotlib
+cat numbers.txt | histogram.sh        # text histogram + percentiles
+
+# ASCII graph (vendored binary)
+for i in {1..100}; do echo $i; done | asciigraph -h 20
 ```
 
 ### Networking
@@ -152,15 +163,17 @@ cat numbers.txt | histogram.py
 | [`tcpdump2binary.py`](tcpdump2binary.py) | Extract raw Ethernet frames from a pcap into binary files (uses scapy) |
 | [`myip.sh`](myip.sh) | Show my public IP |
 | [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
-| [`nointernet.for.genymotion.sh`](nointernet.for.genymotion.sh) | Block Genymotion VM from internet access |
-| [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | Download YouTube video from clipboard URL |
-| [`yt-dlp.sh`](yt-dlp.sh) | Wrapper around Dockerfiles/Dockerfile.yt-dlp container (sandbox the madness) |
+| [`nointernet.for.genymotion.sh`](nointernet.for.genymotion.sh) | Run Genymotion with no internet but a working private loopback (localhost adb only) |
+| [`youtubeFromClipboard.sh`](youtubeFromClipboard.sh) | daemon; auto-plays video URLs found in the clipboard via `mpv`, hands `zathura: http…` URLs to Firefox |
+| [`yt-dlp.sh`](yt-dlp.sh) | Run yt-dlp safely (JS madness!) from inside a container that maps $PWD inside it |
+| [`SendAtWarp9`](SendAtWarp9) / [`ReceiveAtWarp9`](ReceiveAtWarp9) | Push files across a LAN: `tar \| lzop -1 \| nc` on one side, `nc -l \| lzop -d \| tar x` on the other, port 9656 |
+| [`SendAtWarp9r`](SendAtWarp9r) / [`ReceiveAtWarp9r`](ReceiveAtWarp9r) | Same transfer with the roles reversed -- the sender listens, the receiver connects |
 
 ### Subtitle tools
 
 | Script | What it does |
 |---|---|
-| [`get_subs_tmux.sh`](get_subs_tmux.sh) | Download YouTube subtitles, convert to text, launch interactive pi session to summarize. Symlinked as [`zz`](zz) |
+| [`get_subs_tmux.sh`](get_subs_tmux.sh) | Download YouTube subtitles, convert to text, launch an interactive pi session to summarize |
 | [`vtt2text.py`](vtt2text.py) | Convert VTT subtitle files to clean text |
 | [`subrip.sh`](subrip.sh) | Subtitle RIP/conversion utility |
 | [`sub_auto_fixer.py`](sub_auto_fixer.py) | Match subtitle files to video files by Dice coefficient + LCS |
@@ -174,8 +187,8 @@ cat numbers.txt | histogram.py
 | [`exclude.sh`](exclude.sh) | Interactively filter lines from a file by regex (used with `latest.py`) |
 | [`excludeFilter.sh`](excludeFilter.sh) | Same, but via stdin pipe |
 | [`greedy.py`](greedy.py) | Pack files to maximally fit a target size |
-| [`lost_my_space.py`](lost_my_space.py) | Find what's consuming disk space in a filesystem |
-| [`lost_my_space.sh`](lost_my_space.sh) | Bash wrapper |
+| [`lost_my_space.py`](lost_my_space.py) | Compares current fs against previous snapshot of file sizes (`-u` takes a new snapshot) |
+| [`lost_my_space.sh`](lost_my_space.sh) | wrapper around the .py: keeps the DB in `/root/bin.local`, then filters the output via `exclude.sh` |
 | [`logDurations.py`](logDurations.py) | Parse timestamped logs and show duration of each run |
 | [`sortXML.py`](sortXML.py) | Sort XML elements while preserving structure |
 | [`csvToHTML_bootstrap.py`](csvToHTML_bootstrap.py) | CSV → styled HTML table (Bootstrap) |
@@ -186,6 +199,12 @@ cat numbers.txt | histogram.py
 | [`inlineDataInHTML.sh`](inlineDataInHTML.sh) | Generate data: URI for embedding files in HTML |
 | [`nocolor.sh`](nocolor.sh) | Strip ANSI color codes from pipe |
 | [`quote.sh`](quote.sh) | Wrap each line in double-quotes, escaping inner quotes |
+| [`nth`](nth) | Print field N of each line, negative indexes allowed -- the `awk '{print $3}'` shortcut |
+| [`supergrep.pl`](supergrep.pl) | Minimal grep over stdin/files with `-n`, `-v`, `-i` |
+| [`gdv`](gdv) | Open every file modified in the current git repo in vim, ready for GitGutter staging |
+| [`encfs`](encfs) | `encfs` wrapper that makes both arguments absolute and adds `-o allow_root` |
+| [`opus.it.sh`](opus.it.sh) | Convert a media file's audio track to 64kbps opus |
+| [`showPackages`](showPackages) | List Debian packages by installed size, largest last |
 
 ### Clipboard & automation
 
@@ -194,7 +213,7 @@ cat numbers.txt | histogram.py
 | [`clipboardDaemon.py`](clipboardDaemon.py) | Clipboard monitoring daemon |
 | [`execOnChange.sh`](execOnChange.sh) | Run a command whenever files matching a pattern change (like `make` for file changes) |
 | [`batch.SMP.processing.with.bash`](batch.SMP.processing.with.bash) | Simple parallel processing with bash |
-| [`lock.sh`](lock.sh) | Lock screen (i3lock) |
+| [`lock.sh`](lock.sh) | Lock screen via `xscreensaver` |
 | [`setTitle.sh`](setTitle.sh) | Set XTerm title |
 | [`tmux-attach.sh`](tmux-attach.sh) | Attach to a tmux session |
 | [`tmux-restore.sh`](tmux-restore.sh) | Restore tmux sessions from saved state |
@@ -209,10 +228,12 @@ cat numbers.txt | histogram.py
 | [`cpptypefmt`](cpptypefmt) | C++ type formatting helper |
 | [`clean-template-mess.py`](clean-template-mess.py) | Pretty-print C++ template instantiations with indentation |
 | [`findClassInJars.sh`](findClassInJars.sh) | Find a class name inside a collection of JAR files |
+| [`scalaRunner`](scalaRunner) | Run a Scala script with `-savecompiled -deprecation` |
+| [`make-phase1`](make-phase1) | Ask make what it knows: dump its variables and implicit rules for a target, with env/autovar noise filtered |
+| [`strace_resumed.awk`](strace_resumed.awk) | `awk -f` filter that re-joins strace's `<unfinished ...>` / `<... resumed>` pairs per PID |
 | [`findIn`](findIn) | Flexible file content search |
 | [`git-lg`](git-lg) | Git log with graph (one-line) |
 | [`diffIgnoreCaseAndWS.sh`](diffIgnoreCaseAndWS.sh) | `diff -u -i -b` wrapper |
-| [`diffu`](diffu) | Unified diff shortcut |
 | [`diffu.meld`](diffu.meld) | Diff with meld |
 | [`xmlprettyprint.sh`](xmlprettyprint.sh) | XML pretty-printer (symlink to tidyXML.sh) |
 | [`tidyXML.sh`](tidyXML.sh) | XML tidy/format |
@@ -261,8 +282,8 @@ cat numbers.txt | histogram.py
 | [`thread_callstacks.sh`](thread_callstacks.sh) | Symlink to above |
 | [`snap_remove_old_versions.sh`](snap_remove_old_versions.sh) | Clean old snap package versions |
 | [`archLinux.orphans.ordered.by.size.sh`](archLinux.orphans.ordered.by.size.sh) | List orphaned pacman packages sorted by size |
-| [`x11.off.sh`](x11.off.sh) | Turn off display (DPMS) |
-| [`x11.off.saver`](x11.off.saver) | Screen saver variant |
+| [`x11.off.sh`](x11.off.sh) | Blank/lock the console with `i3lock` |
+| [`x11.off.saver`](x11.off.saver) | Turn display off via `xset dpms`/`xset s` |
 | [`fixClock.sh`](fixClock.sh) | Sync system clock via NTP (`pool.ntp.org`) |
 | [`7z-ttsiod-compress`](7z-ttsiod-compress) | 7z compression wrapper |
 | [`makeSelfSignedCertificate.sh`](makeSelfSignedCertificate.sh) | Generate self-signed SSL certificate (legacy, use Let's Encrypt instead) |
@@ -300,8 +321,17 @@ below, which are other people's work and keep their own upstream licence.
 
 - **Most scripts**: bash, standard POSIX tools
 - **Python scripts**: Python 3, various modules (see docstrings)
-- **Video scripts**: `ffmpeg` / `ffprobe`, `mkvmerge`, `x264`/`x265`, VAAPI or NVENC drivers
+- **`nth`**: pure stdlib; `waitForCoolCPU.sh` and `pulseaudio_record.sh` depend on it
+- **Warp9 transfers**: `lzop`, `nc` (classic netcat `-l -p` syntax); no encryption -- trusted LANs only
+- **Video scripts**: `ffmpeg` / `ffprobe`, `mplayer`, `mkvmerge` / `mkvextract`, `x264`/`x265`, VAAPI or NVENC drivers
 - **`isolate.sh`**: `firejail`, `ip`, `getent`
 - **`dockerme.sh`**: Docker
+- **`lost_my_space.py`**: `zstd` / `zstdcat`, plus `pv` when using the wrapper
 - **`pi.isolated.sh`**: A locally running LLM endpoint (llama.cpp, vLLM, etc.)
-- **`cclog.sh`**: Docker image `cclog` (build from `localAI/`)
+- **`histogram.sh`**: `datamash`, `column`; **`histogram.py` / `asciigraph.py`**: matplotlib and numpy
+- **`crystaldiskmark.sh`, `benchmark.nvme.via.io.uring.sh`**: `fio`
+- **`clipboardDaemon.py`, `youtubeFromClipboard.sh`**: `xclip`; **tmux helpers**: `tmux`; **`pi.isolated.sh` tunnel**: `socat`
+- **`dump_all_thread_callstacks_for_pid.sh`, `dumpMemoryOfPID.sh`, `x16.py`**: `gdb`
+- **`find_dup_images.py`**: `ImageHash`, `pillow` (pip) and `feh` to review the groups
+- **`excelToCsv.py`**: `xlrd`
+- **Single-tool scripts**: `wget` (`myip.sh`), `bc` (`tohex`, `todec`), `mimetype` (`inlineDataInHTML.sh`), `pdfinfo` (`pdfCountPages.sh`), `yq` + `jq` (`yq_outliers.sh`), `exiftool` (`png2webp.sh`), `lepton` (`jpg2lep.sh`), `lm-sensors` (`waitForCoolCPU.sh`), `pactl`/`parec` + `oggenc` (`pulseaudio_record.sh`), `fzf` + `bat` (`fzf-preview.sh`), `xscreensaver` (`lock.sh`), `i3lock` (`x11.off.sh`)

@@ -5,7 +5,7 @@ Download only subtitles from YouTube with youtube-dl:
 youtube-dl  --skip-download --convert-subs vtt <video_url>
 
 To convert all vtt files inside a directory:
-find . -name "*.vtt" -exec python vtt2text_new.py {} \;
+find . -name "*.vtt" -exec python vtt2text.py {} \;
 """
 
 import sys

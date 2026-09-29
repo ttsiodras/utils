@@ -13,7 +13,7 @@ do
         BATTERY_CHECK=1
         BATTERY_LEVEL=$(acpi | awk -F '[ %]' '/^Battery/ {print $4}')
         if [ "$BATTERY_LEVEL" -lt 30 -o "$BATTERY_LEVEL" -gt 82 ] ; then
-            mpv /opt/src/ttsiod/dev/perl/gong.wav.disabled
+            mpv /sea/Media/Audio/gong.wav
             echo "[x] Battery longevity levels exceeded, do something"
         fi
     fi

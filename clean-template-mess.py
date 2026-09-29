@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Pretty-print C++ template instantiations with indentation.
-Usage: c++filt | python3 format_templates.py
-   or: python3 format_templates.py < input.txt
+Usage: c++filt | python3 clean-template-mess.py
+   or: python3 clean-template-mess.py < input.txt
 """
 
 import sys

@@ -3,7 +3,7 @@
 # A helper script to debug makefiles - from the best Makefile article
 # I have ever read in my life:
 #
-#  http://gromnitsky.users.sourceforge.net/articles/notes-for-new-make-users/
+#  https://web.archive.org/web/20180306001530/http://gromnitsky.users.sourceforge.net/articles/notes-for-new-make-users/
 # 
 unset TERMCAP
 re_env=$(env | cut -d= -f1 | tr \\n '|')

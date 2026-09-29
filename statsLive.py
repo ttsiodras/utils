@@ -3,7 +3,7 @@
 Observe mean and stddev of input data coming over stdin.
 
 $ for i in {1..10} ; do echo $i ; sleep 1 ; done | \
-        ./incremental_stats.py 5
+        ./statsLive.py 5
 
 The optional argument indicates number of fractional digits.
 

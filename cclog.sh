@@ -6,7 +6,7 @@ if [ $# -ne 2 ] ; then
     exit 1
 fi
 docker images | grep cclog || {
-    echo "[-] Run 'make cclog' from inside ${SCRIPT_DIR}/localAI to build the cclog image."
+    echo "[-] Run 'make cclog' from inside ${SCRIPT_DIR}/Dockerfiles to build the cclog image."
     exit 1
 }
 REALPATH="$(realpath "$1")"
