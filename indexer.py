@@ -23,10 +23,11 @@ import hashlib
 import os
 import sqlite3
 import sys
+import tomllib        # stdlib from 3.11, which is this tool's floor
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from itertools import chain, islice
-from typing import (Dict, Generator, Iterable, List, NamedTuple, Optional,
-                    Set, Tuple)
+from typing import (Any, Dict, Generator, Iterable, List, NamedTuple, Optional,
+                    Set, Tuple, TypedDict, cast)
 
 
 # --- Type aliases ---
@@ -244,7 +245,23 @@ _CONFIG_KEYS = {
 }
 
 
-def load_config(explicit: Optional[str] = None) -> Tuple[Dict[str, object],
+class Config(TypedDict, total=False):
+    """The validated contents of indexer.toml - only the keys we understand.
+
+    Every key is checked against _CONFIG_KEYS by load_config() before it can
+    reach here, so downstream code gets real types (List[str] / str) instead of
+    Any. tomllib hands us dict[str, Any] because it knows nothing about our
+    schema; that boundary is the one place Any is legitimate, and cast() marks
+    where the unvalidated-to-validated transition happens.
+    """
+
+    drop_dir_tokens: List[str]
+    drop_name_substrings: List[str]
+    db: str
+    report: str
+
+
+def load_config(explicit: Optional[str] = None) -> Tuple[Config,
                                                          Optional[str]]:
     """Read the per-machine indexer.toml that sits next to this script.
 
@@ -263,17 +280,12 @@ def load_config(explicit: Optional[str] = None) -> Tuple[Dict[str, object],
     if not os.path.isfile(path):
         return {}, None
     try:
-        import tomllib                              # stdlib since 3.11
-    except ImportError:
-        print(f"Error: {path} needs Python 3.11+ (no tomllib)")
-        sys.exit(1)
-    try:
         with open(path, 'rb') as f:
             raw = tomllib.load(f)
     except (OSError, ValueError) as error:
         print(f"Error: cannot read {path}: {error}")
         sys.exit(1)
-    cfg: Dict[str, object] = {}
+    settings: Dict[str, Any] = {}
     for key, want in _CONFIG_KEYS.items():
         if key not in raw:
             continue
@@ -283,13 +295,14 @@ def load_config(explicit: Optional[str] = None) -> Tuple[Dict[str, object],
             print(f"Error: {path}: {key} must be a "
                   f"{'list of strings' if want is list else want.__name__}")
             sys.exit(1)
-        cfg[key] = value
+        settings[key] = value
     for extra in sorted(set(raw) - set(_CONFIG_KEYS)):
         print(f"[!] {path}: ignoring unknown key {extra!r}")
-    return cfg, path
+    # Validated against _CONFIG_KEYS above, so the narrowing is earned here.
+    return cast(Config, settings), path
 
 
-def apply_config(cfg: Dict[str, object]) -> None:
+def apply_config(cfg: Config) -> None:
     """Push the config into the module settings the scan uses."""
     global _DROP_DIR_TOKENS, _DROP_NAME_SUBSTRINGS  # pylint: disable=W0603
     if 'drop_dir_tokens' in cfg:
@@ -904,8 +917,8 @@ def main() -> None:
     # from the indexer.toml beside the script; command line options override.
     cfg, cfg_path = load_config(args.config)
     apply_config(cfg)
-    db_path: str = args.db or str(cfg.get('db', 'files.db'))
-    report_path: str = args.report or str(cfg.get('report', 'report.log'))
+    db_path: str = args.db or cfg.get('db', 'files.db')
+    report_path: str = args.report or cfg.get('report', 'report.log')
     # Status, not a warning: with no file this run excludes nothing, and that
     # shows up here as "no config file: excluding nothing / 0 dir tokens".
     print(f"[-] config {cfg_path or 'no config file: excluding nothing'}: "
