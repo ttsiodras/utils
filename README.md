@@ -26,7 +26,6 @@ that is *definitely* recommended :-)
 | [`pi.isolated.sh`](pi.isolated.sh) | Run `pi` (AI coding agent) inside `isolate.sh`, tunneling through a Unix socket to reach a local LLM. Symlinked as [`pi.sh`](pi.sh) |
 | [`desert_island_container_execution.sh`](desert_island_container_execution.sh) | Run untrusted TCP server code in a Docker container that the host can reach, but the container can't reach outside the LAN |
 | [`dockerme.sh`](dockerme.sh) | Launch a Docker container with the current folder mapped, optional X11/PulseAudio passthrough, network toggle, root toggle |
-| [`dockerClearRunningContainersAndNoneImages.sh`](dockerClearRunningContainersAndNoneImages.sh) | Nuke all containers and `<none>` images |
 | [`parse-isolation-options-common.sh`](parse-isolation-options-common.sh) | Shared argument parser for isolate.sh / pi.isolated.sh (sourced, not standalone) |
 
 Example usage of isolation (vimisolated.sh is much better, but this works as a basic example:
