@@ -10,11 +10,8 @@ except (AttributeError, ValueError):
 ROLES = {"toolResult": "Tool result"}    # everything else is just role.title()
 
 
-def clip(text, limit=20):                # keep one huge tool result from flooding the file
-    lines = text.split("\n")
-    if len(lines) > limit:
-        lines = lines[:limit] + ["[%d more lines]" % (len(lines) - limit)]
-    return "\n".join(lines)
+def clip(text):                # keep one huge tool result from flooding the file
+    return text
 
 
 def fence(text, lang="text"):
