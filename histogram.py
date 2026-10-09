@@ -41,6 +41,17 @@ def is_outlier(points, thresh=3.5):
     diff = np.sqrt(diff)
     med_abs_deviation = np.median(diff)
 
+    if med_abs_deviation == 0:
+        # More than half the points share the exact same value, so the
+        # median absolute deviation collapses to zero -- the division below
+        # would produce NaN for those points (read as "not an outlier") and
+        # Inf for every other point (read as "outlier"), silently deleting
+        # an entire secondary cluster (e.g. a real bimodal distribution)
+        # instead of trimming actual noise. With no valid measure of spread
+        # to score against, the only honest answer is that nothing can be
+        # confidently classified as an outlier.
+        return np.zeros(points.shape[0], dtype=bool)
+
     modified_z_score = 0.6745 * diff / med_abs_deviation
 
     return modified_z_score > thresh
