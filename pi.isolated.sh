@@ -792,6 +792,14 @@ fi
 if [[ " ${APP[*]} " == *" -p "* || " ${APP[*]} " == *" --print "* ]]; then
     isolate.sh "${ISOLATE_ARGS[@]}" bash -c "$INNER_CMD"
 else
+    # --private-tmp gives the sandbox a fresh empty /tmp, so the host's
+    # /tmp/tmux-$UID/ cannot be seen there.  If we were launched from inside a
+    # tmux session, $TMUX holds the *host* socket path and the sandboxed tmux
+    # blindly uses it (it trusts it, never mkdir()s it) -> bind() fails:
+    #   error creating /tmp/tmux-1000/default (No such file or directory)
+    # Clearing $TMUX makes tmux compute (and create) its own socket inside the
+    # sandbox's private /tmp, and also avoids the "nested sessions" refusal.
     isolate.sh "${ISOLATE_ARGS[@]}" \
+        env -u TMUX -u TMUX_PANE \
         tmux new-session -A -s "pi_session_${OUR_RANDOM_PID}" "bash -c '$INNER_CMD'"
 fi
