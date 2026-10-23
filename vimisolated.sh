@@ -46,6 +46,9 @@ ISO_ARGS=(
     --rw /tmp/.X11-unix/ --rw "$PWD")
 VIM_ARGS=()
 
+# --servers args are kept apart so --no-servers can drop all of them, even
+# ones given before it (e.g. by a launcher that always passes some).
+SERVER_ARGS=()
 NOSERVERS=
 
 # Split: consume known isolate.sh flags, pass everything else to vim.
@@ -55,12 +58,23 @@ while [[ $# -gt 0 ]]; do
             ISO_ARGS+=("$1")
             shift
             ;;
-        --rw|--hide|--servers|--iface|--dns)
+        --servers)
+            # Reject a flag as the filename, so `--servers --no-servers`
+            # can't silently swallow --no-servers.
+            [[ $# -ge 2 && $2 != -* ]] || { echo "vim-launcher: $1 requires an argument" >&2; exit 1; }
+            SERVER_ARGS+=("$1" "$2")
+            shift 2
+            ;;
+        --servers=*)
+            SERVER_ARGS+=("$1")
+            shift
+            ;;
+        --rw|--hide|--iface|--dns)
             [[ $# -ge 2 ]] || { echo "vim-launcher: $1 requires an argument" >&2; exit 1; }
             ISO_ARGS+=("$1" "$2")
             shift 2
             ;;
-        --rw=*|--hide=*|--servers=*|--iface=*|--dns=*)
+        --rw=*|--hide=*|--iface=*|--dns=*)
             ISO_ARGS+=("$1")
             shift
             ;;
@@ -80,7 +94,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --no-servers: no network allowlist at all, so (unless --dns is given)
+# isolate.sh uses --net=none. That also skips firejail's ~1s network setup
+# (because of ARP-probes against the sandbox's address for a second before using it).
 [ -z "$NOSERVERS" ] && {
+    ISO_ARGS+=("${SERVER_ARGS[@]+"${SERVER_ARGS[@]}"}")
     # Auto-add the network whitelist if present. isolate.sh accepts --servers
     # repeatably and concatenates them, so caller-supplied --servers still apply.
     WHITELIST="$HOME/.vim/whitelisted.servers"
