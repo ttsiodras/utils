@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# Use this to record large tcpdumps:
+#
+# sudo timeout 300 \
+#     tcpdump -i any   -G 300 \
+#     -w "$HOME/logs.really.large.tcpdump.ones/capture-%Y%m%d-%H%M%S.pcap" -z ~/bin/pcap-compress --nano -B 1048576
+#
+exec /usr/bin/zstd -T2 --rm -- "$1"
