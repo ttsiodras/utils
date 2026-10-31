@@ -13,7 +13,7 @@ read -rp "Choice: " model_choice
 
 echo "Backend:"
 echo "  1) Vulkan"
-#echo "  2) ROCM"
+echo "  2) SyCL"
 read -rp "Choice: " backend_choice
 
 case $model_choice in
@@ -24,7 +24,7 @@ esac
 
 case $backend_choice in
   1) DEVICE="vulkan0" ;;
-  2) DEVICE="ROCM0" ;;
+  2) DEVICE="SYCL0" ;;
   *) echo "[!] Invalid backend choice"; exit 1 ;;
 esac
 

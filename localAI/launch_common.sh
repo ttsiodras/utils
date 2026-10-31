@@ -12,9 +12,9 @@ COMMON_ARGS="
   --flash-attn on
   --presence-penalty 0.0
   --repeat-penalty 1.0
-  --no-mmap
-  --mlock
 "
+# --no-mmap
+# --mlock
 
 GEMMA_ARGS="
   --hf-repo google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0
