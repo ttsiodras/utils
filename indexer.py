@@ -370,21 +370,16 @@ def scan_folder(  # pylint: disable=too-many-branches
             if any(token in entry.name for token in _DROP_NAME_SUBSTRINGS):
                 continue
             try:
-                if entry.is_symlink():
-                    # Skip symbolic links (to files or dirs): prevents infinite
-                    # loops and scanning outside top_folder (followlinks=False).
-                    continue
-                if entry.is_dir():
-                    # Descend into real subdirectories only.
+                if entry.is_dir(follow_symlinks=False):
                     stack.append(entry.path)
                     continue
-            except OSError:
-                # Could not stat this entry; skip it rather than aborting.
-                continue
-            # A regular file: use the entry's cached stat (no extra syscall).
-            try:
+                # skip FIFOs, devices, etc
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                # DirEntry caches this, so it costs no extra syscall.
                 st = entry.stat()
             except OSError:
+                # Could not stat this entry; skip it rather than aborting.
                 continue
             results.append(FileMetadata(
                 filename=entry.name,
@@ -863,6 +858,22 @@ def _db_inside_top_folder(folder: str, db_path: str) -> bool:
         return False
 
 
+def _reject_excluded_top_folders(folders: List[str]) -> None:
+    """Abort if a folder we were asked to scan is excluded by config.
+
+    scan_folder() applies the dir-token test to the top folder itself, so it
+    would return nothing; find_changes() would then delete every row under it.
+    """
+    for folder in folders:
+        top_bytes = os.fsencode(os.path.realpath(folder))
+        token = next((t for t in _DROP_DIR_TOKENS if t in top_bytes), None)
+        if token is not None:
+            print(f"Error: folder {folder} is excluded by config dir token "
+                  f"{to_printable(token)!r}; refusing to scan it (its "
+                  f"indexed rows would be deleted).")
+            sys.exit(1)
+
+
 def parse_args() -> argparse.Namespace:
     """Parse and return command line arguments, otherwise exit with help."""
     parser = argparse.ArgumentParser(
@@ -924,6 +935,11 @@ def main() -> None:
     print(f"[-] config {cfg_path or 'no config file: excluding nothing'}: "
           f"{len(_DROP_DIR_TOKENS)} dir tokens, "
           f"{len(_DROP_NAME_SUBSTRINGS)} name skips, db={db_path}")
+
+    # Refuse a folder that config excludes: syncing it would return nothing
+    # and delete its whole index. (-v ignores positional folders entirely.)
+    _reject_excluded_top_folders(
+        args.top_folder if args.validate is None else [])
 
     # Fail fast if the database is stored inside a folder we are about to scan.
     # Doing so would make the tool index its own DB file (and live -wal/-shm
