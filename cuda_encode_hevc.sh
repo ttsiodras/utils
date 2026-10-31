@@ -9,6 +9,5 @@ ffmpeg \
     -preset p4 \
     -rc-lookahead 20 \
     -spatial-aq 1 \
-    -c:a aac \
-    -b:a 128k \
+    -c:a libopus \
     "$1".HEVC.mp4
