@@ -29,6 +29,9 @@ def visit_fs(action):
         }
     except:
         exclusions = {}
+    # Never report our own snapshot: it changes every run and would show up
+    # as a permanent [N] entry.
+    exclusions.add(state_dir())
     for pth, dirlist, filelist in os.walk("/"):
         if any(pth.startswith(x) for x in exclusions):
             continue
@@ -39,10 +42,28 @@ def visit_fs(action):
             action(pth + os.sep + file)
 
 
+def state_dir() -> str:
+    """
+    Where the snapshot lives. The admin case runs as root and keeps it in
+    /var/lib/lost_my_space (mode 0700); anyone else gets their own data dir.
+    The DB must NOT live next to the code: the repo is public, and a snapshot
+    is historical data that cannot be regenerated (so not a cache either).
+    """
+    if os.geteuid() == 0:
+        return "/var/lib/lost_my_space"
+    return os.path.expanduser("~/.local/share/lost_my_space")
+
+
 def main():
     """
     Store - or compare against - a filesystem snapshot.
     """
+    state = state_dir()
+    os.makedirs(state, mode=0o700, exist_ok=True)
+    db = os.path.join(state, "all_files.pickle")
+    if os.geteuid() != 0:
+        print("[-] warning: not running as root - large parts of / will be"
+              " unreadable and the diff will be incomplete", file=sys.stderr)
     if "-u" in sys.argv:
         all_files, cnt = {}, [0]
         print("[-] Files indexed:            ", flush=True, end='',
@@ -63,13 +84,13 @@ def main():
         visit_fs(action_store)
         print("\b\b\b\b\b\b\b\b\b\b\b%11d" % cnt[0], flush=True,
               file=sys.stderr)
-        pickle.dump(all_files, open("all_files.pickle", "wb"))
+        pickle.dump(all_files, open(db, "wb"))
         print("[-] Compressing DB via zstd...", file=sys.stderr)
-        os.system("zstd --rm -f -9 all_files.pickle")
+        subprocess.run(["zstd", "--rm", "-f", "-9", db], check=False)
     else:
         print("[-] Reading previous filesystem snapshot...",
               file=sys.stderr)
-        cmd = ['zstdcat', 'all_files.pickle.zst']
+        cmd = ['zstdcat', db + '.zst']
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, _ = proc.communicate()

@@ -187,7 +187,7 @@ for i in {1..100}; do echo $i; done | asciigraph -h 20
 | [`excludeFilter.sh`](excludeFilter.sh) | Same, but via stdin pipe |
 | [`greedy.py`](greedy.py) | Pack files to maximally fit a target size |
 | [`lost_my_space.py`](lost_my_space.py) | Compares current fs against previous snapshot of file sizes (`-u` takes a new snapshot) |
-| [`lost_my_space.sh`](lost_my_space.sh) | wrapper around the .py: keeps the DB in `/root/bin.local`, then filters the output via `exclude.sh` |
+| [`lost_my_space.sh`](lost_my_space.sh) | wrapper around the .py (root-only): the DB lives in `/var/lib/lost_my_space`, then the output is filtered via `exclude.sh` |
 | [`mydu.sh`](mydu.sh) | Better `du`: sums file sizes (filesystem-agnostic) per directory |
 | [`logDurations.py`](logDurations.py) | Parse timestamped logs and show duration of each run |
 | [`sortXML.py`](sortXML.py) | Sort XML elements while preserving structure |
