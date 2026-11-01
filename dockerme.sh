@@ -16,12 +16,11 @@ usage() {
     exit 1
 }
 
-rm -f /tmp/.docker.xauth*
-XAUTH=/tmp/.docker.xauth
-XSOCK=/tmp/.X11-unix
-DRI=/dev/dri/card0
-touch ${XAUTH}
-xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
+# Hardening (audit F-34): a private 0700 xauth dir per run, not the fixed
+# /tmp/.docker.xauth - another uid can pre-create that name as a symlink and
+# make us write the X cookie through to a file of their choosing.
+. "$HOME/bin/common_xauth.sh" || exit 1
+common_xauth_init dockerme
 
 ROOT="-u 1000"
 NETWORK="--network=none"
@@ -47,20 +46,11 @@ while getopts "hnrp:" o ; do
     esac
 done
             
-exec docker run --rm $ROOT $NETWORK -it                      \
+common_docker_args DARGS
+docker run "${DARGS[@]}" --rm $ROOT $NETWORK -it                      \
         --entrypoint /bin/bash                               \
         -v "$PWD":/workdir                                   \
-        -v "$XDG_RUNTIME_DIR"/pulse:"$XDG_RUNTIME_DIR"/pulse \
-        -e DISPLAY                                           \
-	-e XAUTHORITY=${XAUTH}                               \
-	-e PULSE_SERVER=unix:"$XDG_RUNTIME_DIR"/pulse/native \
-	-v /tmp/.X11-unix:/tmp/.X11-unix                     \
-	-v /dev/shm:/dev/shm                                 \
-        -v $DRI:$DRI                                         \
-        -v ${XSOCK}:${XSOCK}                                 \
-        -v ${XAUTH}:${XAUTH}                                 \
         -w /workdir                                          \
         ${PORT}                                              \
         fasting
 
-rm -f /tmp/.docker.xauth*
