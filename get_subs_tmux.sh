@@ -41,7 +41,7 @@ PI_CMD="source ai.google.key && export GEMINI_API_KEY=\$KEY && ./pi.isolated.sh 
     --url https://generativelanguage.googleapis.com/v1beta/openai \
     --servers localAI/google-servers.txt \
     --dns \${DNS:-1.1.1.1} \
-    -- --model \${MODEL:-gemma-4-26b-a4b-it}"
+    -- --model \${MODEL:-gemini-flash-lite-latest}"
 
 tmux send-keys -t "$SESSION" "$PI_CMD" C-m
 

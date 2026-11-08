@@ -3,7 +3,7 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 source "${SCRIPT_DIR}"/ai.google.key || exit 1
 # Model is overridable: a model Google is 500-ing on is indistinguishable from a
 # hung session, because pi turns the server error into a silent auto-retry loop.
-MODEL="${MODEL:-gemma-4-26b-a4b-it}"
+MODEL="${MODEL:-gemini-flash-lite-latest}"
 # Sandboxed by pi.isolated.sh (isolate.sh + firejail). --url wants the *root* of
 # the OpenAI-compatible endpoint; /v1/models is appended by pi.isolated.sh.
 # -p puts pi one-shot, which also skips the tmux wrapper in pi.isolated.sh.

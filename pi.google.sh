@@ -19,7 +19,7 @@ source "${SCRIPT_DIR}"/ai.google.key || exit 1
 
 # Model is overridable: a model Google is 500-ing on is indistinguishable from a
 # hung session, because pi turns the server error into a silent auto-retry loop.
-MODEL="${MODEL:-gemma-4-26b-a4b-it}"
+MODEL="${MODEL:-gemini-flash-lite-latest}"
 
 # Sandboxed by pi.isolated.sh (isolate.sh + firejail): $HOME read-only, only $PWD
 # writable, and the only host reachable off-box is the one listed in
