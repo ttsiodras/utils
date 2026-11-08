@@ -179,6 +179,7 @@ Everything can be overridden from the command line.
 import argparse
 import http.client
 import json
+import os
 import re
 import socket
 import sys
@@ -428,13 +429,20 @@ def detect_vision(model_id, props, family, image_mode, metrics=None):
     # multimodal models -> authoritative, no name guessing needed.
     if metrics and re.search(r"vllm:mm_(cache|inputs|items)", metrics):
         return True
+    # llama.cpp reports the projector it actually loaded in /props.modalities,
+    # and that is authoritative in BOTH directions: a server started with
+    # --no-mmproj says vision:false, so it must not be mis-detected as vision
+    # just because the model name contains "VL".  (A substring search over the
+    # whole props blob used to match the *key* name "vision" and return True
+    # even when its value was false.)
+    if isinstance(props, dict) and isinstance(props.get("modalities"), dict):
+        return bool(props["modalities"].get("vision"))
     low = model_id.lower()
     if re.search(VISION_PATTERN, low):
         return True
-    if props:
-        blob = json.dumps(props).lower()
-        if "mmproj" in blob or "vision" in blob:
-            return True
+    # older llama.cpp builds may only expose a projector path
+    if isinstance(props, dict) and props.get("mmproj"):
+        return True
     return bool(family["vision_hint"])
 
 
@@ -711,16 +719,50 @@ def main():
             "supportsReasoningEffort": False,
         }
 
-    cfg = {"providers": {provider_name: {
+    # Merge into any existing file.  This tool owns the single provider entry
+    # it writes ('local-vllm' / 'openai-compatible') and replaces just that
+    # key: every other provider, and anything hand-edited elsewhere in the
+    # file, is left alone.  (Rewriting the whole file used to wipe unrelated
+    # providers, and any other locally-detected model along with them.)
+    out_path = os.path.realpath(args.output)
+    doc = {}
+    try:
+        with open(out_path) as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            doc = loaded
+        else:
+            log(f"[!] {args.output} is not a JSON object; rewriting it")
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        log(f"[!] {args.output} unreadable ({e}); rewriting it")
+
+    providers = doc.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    kept = sorted(k for k in providers if k != provider_name)
+    providers[provider_name] = {
         "baseUrl": f"{out_base}/v1",
         "api": "openai-completions",
         "apiKey": args.api_key or "dummy",
         "models": [model_cfg],
-    }}}
+    }
+    doc["providers"] = providers
 
-    with open(args.output, "w") as f:
-        json.dump(cfg, f, indent=2)
+    # atomic replace, preserving the existing file mode
+    tmp_path = f"{out_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w") as f:
+        json.dump(doc, f, indent=2)
         f.write("\n")
+    try:
+        mode = os.stat(out_path).st_mode & 0o7777
+    except OSError:
+        mode = 0o644
+    os.chmod(tmp_path, mode)
+    os.replace(tmp_path, out_path)
+    if kept:
+        log(f"[+] Kept {len(kept)} other provider(s): {', '.join(kept)}")
 
     # Summary
     def enabled_levels():
@@ -731,6 +773,14 @@ def main():
 
     log(f"[+] Server: {server}  |  Model: {model_id}")
     log(f"[+] Context: {ctx}  |  Vision: {'yes' if vision else 'no'}")
+    reserve = 16384  # pi's default compaction.reserveTokens
+    if ctx <= reserve:
+        log(f"[!] contextWindow {ctx} <= compaction reserveTokens {reserve}:"
+            f" pi will auto-compact on essentially every turn - raise the"
+            f" server's context size, or lower compaction.reserveTokens in"
+            f" settings.json")
+    else:
+        log(f"[i] Usable window before auto-compaction: ~{ctx - reserve} tokens")
     if fam["reasoning"]:
         log(f"[+] Reasoning: yes  |  family: {fam['family']}  |  "
             f"thinkingFormat: {fam['fmt']}  |  "
